@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+poc/
+PROJECT_LEDGER.md
+docs/deploy-result-*.md
+packaging/macos/.venv/
+packaging/macos/AppIcon.iconset/
+packaging/macos/logo_src.png
