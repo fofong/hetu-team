@@ -37,6 +37,28 @@ class GroupService:
         self._project_new()
         return member
 
+    # ---- Persona（群成员人格/任务设定）----
+    def set_persona(self, group_id: str, member_id: str, persona: str, task: str = "") -> dict | None:
+        self.store.append("member.persona_set",
+                          {"group_id": group_id, "member_id": member_id,
+                           "persona": persona, "task": task},
+                          idempotency_key=f"persona-{member_id}-{uuid.uuid4().hex}")
+        self._project_new()
+        return self.member(member_id)
+
+    def member(self, member_id: str) -> dict | None:
+        for ms in self._members.values():
+            for m in ms:
+                if m["member_id"] == member_id:
+                    return m
+        return None
+
+    def persona_of(self, group_id: str, name: str) -> tuple[str, str]:
+        for m in self._members.get(group_id, []):
+            if m["name"] == name:
+                return m.get("persona", ""), m.get("task", "")
+        return "", ""
+
     # ---- Message / Thread ----
     def post_message(
         self,
@@ -121,6 +143,11 @@ class GroupService:
             self._members.setdefault(p["group_id"], [])
         elif e["kind"] == "member.joined":
             self._members.setdefault(p["group_id"], []).append(p)
+        elif e["kind"] == "member.persona_set":
+            for m in self._members.get(p["group_id"], []):
+                if m["member_id"] == p["member_id"]:
+                    m["persona"] = p["persona"]
+                    m["task"] = p["task"]
         elif e["kind"] == "message.created":
             self._messages[p["message_id"]] = p
             self._group_seq[p["group_id"]] = max(self._group_seq.get(p["group_id"], 0), p["group_seq"])

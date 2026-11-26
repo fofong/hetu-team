@@ -19,6 +19,7 @@ from .gateway import A2AGateway
 from .groups import GroupService
 from .handoff import HandoffService
 from .approvals import ApprovalService
+from .memory import MemoryService
 from .tasks import TaskService
 
 
@@ -98,6 +99,16 @@ class ApprovalConsumeIn(BaseModel):
     args: dict = {}
 
 
+class PersonaIn(BaseModel):
+    persona: str
+    task: str = ""
+
+
+class MemoryIn(BaseModel):
+    text: str
+    kind: str = "fact"
+
+
 def create_app(db_path: str, transport=None) -> FastAPI:
     store = EventStore(db_path)
     groups = GroupService(store)
@@ -107,6 +118,21 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     gateway = A2AGateway(store, transport=transport) if transport is not None else A2AGateway(store)
     handoffs = HandoffService(store)
     approvals = ApprovalService(store)
+    memories = MemoryService(store)
+
+    def compose_prompt(gid: str, agent_name: str, task_text: str) -> str:
+        """委派 prompt = 人格 + 职责 + 召回记忆 + 任务；无设定原样（反例保护）."""
+        persona, duty = groups.persona_of(gid, agent_name)
+        if not persona:
+            return task_text
+        parts = [f"【你的角色设定】{persona}"]
+        if duty:
+            parts.append(f"【你的职责】{duty}")
+        hits = memories.recall(gid, agent_name, task_text, limit=5)
+        if hits:
+            parts.append("【已记住的相关信息】\n" + "\n".join(f"- {h['text']}" for h in hits))
+        parts.append(f"【本次任务】{task_text}")
+        return "\n\n".join(parts)
     app = FastAPI(title="Hetu Bot-team IM & Event Server")
     from fastapi.middleware.cors import CORSMiddleware
 
@@ -167,7 +193,8 @@ def create_app(db_path: str, transport=None) -> FastAPI:
             for rid in responders:
                 name = by_id.get(rid, {}).get("name", rid)
                 if name in gateway._agents:
-                    gateway.delegate(f"msg-{msg['message_id']}-{name}", name, msg["text"], group_id=gid)
+                    gateway.delegate(f"msg-{msg['message_id']}-{name}", name,
+                                     compose_prompt(gid, name, msg["text"]), group_id=gid)
         return {**msg, "route": route}
 
     @app.get("/groups/{gid}/events")
@@ -229,7 +256,8 @@ def create_app(db_path: str, transport=None) -> FastAPI:
             ctx = d.get("ctx") or {"root": d["botteam_task_id"], "depth": 0, "lineage": [d["agent_id"]]}
             out = handoffs.handoff(d["group_id"], from_agent=d["agent_id"], targets=body.handoff, ctx=ctx)
             for t in out["accepted"]:
-                gateway.delegate(f"handoff-{body.a2a_task_id}-{t['agent']}", t["agent"], t["task"],
+                gateway.delegate(f"handoff-{body.a2a_task_id}-{t['agent']}", t["agent"],
+                                 compose_prompt(d["group_id"], t["agent"], t["task"]),
                                  group_id=d["group_id"], ctx=out["next_ctx"])
             return {**d, "handoff_result": out}
         return d
@@ -245,6 +273,26 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
             return JSONResponse({"error": "not found"}, status_code=404)
         return gateway._delegations[bt_task_id]
+
+    # ---- 人格 / 记忆 endpoints ----
+    @app.post("/groups/{gid}/members/{mid}/persona")
+    def set_persona(gid: str, mid: str, body: PersonaIn):
+        m = groups.set_persona(gid, mid, persona=body.persona, task=body.task)
+        if m is None:
+            return JSONResponse({"error": "member not found"}, status_code=404)
+        return m
+
+    @app.post("/groups/{gid}/agents/{aid}/memory")
+    def remember(gid: str, aid: str, body: MemoryIn):
+        return memories.remember(gid, aid, text=body.text, kind=body.kind)
+
+    @app.get("/groups/{gid}/agents/{aid}/memory")
+    def recall(gid: str, aid: str, q: str = "", limit: int = 20):
+        return memories.recall(gid, aid, q, limit=limit)
+
+    @app.delete("/groups/{gid}/agents/{aid}/memory/{mid}")
+    def forget(gid: str, aid: str, mid: str):
+        return {"forgotten": memories.forget(gid, aid, mid)}
 
     # ---- 审批闸门 endpoints ----
     @app.post("/groups/{gid}/approvals")

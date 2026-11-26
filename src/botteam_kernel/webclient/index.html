@@ -76,6 +76,40 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
 .mem .av .dot{position:absolute;right:-2px;bottom:-2px;width:9px;height:9px;border-radius:50%;background:#22c55e;border:2px solid #fff}
 .mem small{color:var(--sub);display:block;font-size:11px}
 .mem .tag{background:#fff1e6;color:#d46b08;border-radius:3px;padding:0 4px;margin-left:4px;font-size:11px}
+.mem{cursor:pointer}
+.mem:hover{background:#f6f8fb}
+.msg .avatar{cursor:pointer}
+/* QQ 式个人名片 */
+#card{position:fixed;z-index:50;width:300px;background:#fff;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.18);display:none;overflow:hidden}
+#card .cover{height:64px;background:linear-gradient(120deg,#b7e3fb,#d8f1ff)}
+#card .body{display:flex;gap:12px;padding:0 16px 12px;margin-top:-26px}
+#card .cav{width:56px;height:56px;border-radius:8px;border:2px solid #fff;background:#ffb266;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;flex:none;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+#card .cav.human{background:#7aa5ff}
+#card .cinfo{padding-top:26px;min-width:0}
+#card .cname{font-size:16px;font-weight:600}
+#card .cno{color:var(--sub);font-size:12px}
+#card .csign{padding:0 16px 12px;color:#57606c;font-size:13px;border-bottom:1px solid #f0f1f3;white-space:pre-wrap;max-height:66px;overflow:auto}
+#card .acts{display:flex;justify-content:flex-end;gap:14px;padding:9px 16px}
+#card .acts a{color:var(--qq);font-size:13px;cursor:pointer;text-decoration:none}
+#card .acts a:hover{text-decoration:underline}
+/* 模态 */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:60;display:none;align-items:center;justify-content:center}
+.modal{background:#fff;border-radius:8px;width:420px;max-height:76vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.25)}
+.modal h3{font-size:15px;padding:14px 18px;border-bottom:1px solid #f0f1f3;display:flex;justify-content:space-between}
+.modal h3 span{cursor:pointer;color:var(--sub)}
+.modal .mbody{padding:14px 18px;overflow-y:auto}
+.modal label{display:block;font-size:12px;color:var(--sub);margin:10px 0 4px}
+.modal textarea,.modal input{width:100%;border:1px solid #d5d8dd;border-radius:4px;padding:7px 9px;font:inherit;font-size:13px;outline:none}
+.modal textarea:focus,.modal input:focus{border-color:var(--qq)}
+.modal .mfoot{padding:12px 18px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #f0f1f3}
+.modal .mfoot button{border:0;border-radius:4px;padding:6px 18px;font:inherit;cursor:pointer;background:#f0f1f3;color:#333}
+.modal .mfoot .pri{background:var(--qq);color:#fff}
+.memrow{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px dashed #eef0f3;font-size:13px}
+.memrow .tx{flex:1;word-break:break-word}
+.memrow .del{color:var(--sub);cursor:pointer;flex:none}
+.memrow .del:hover{color:#fa5151}
+.memadd{display:flex;gap:8px;margin-top:12px}
+.memadd input{flex:1}
 </style>
 </head>
 <body>
@@ -101,10 +135,14 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
   </div>
 </div>
 <div id="members"><h2 id="memtitle">群成员</h2><div id="memlist"></div></div>
+<div id="card"></div>
+<div class="mask" id="mask" onclick="if(event.target===this)closeModals()">
+  <div class="modal" id="modal"></div>
+</div>
 <script>
 const API = new URLSearchParams(location.search).get('server') || (location.port === '8877' ? location.origin : 'http://10.66.10.2:8877');
 const ME = '沣锅';
-let gid = null, lastSeq = 0, ws = null;
+let gid = null, lastSeq = 0, ws = null, MEMBERS = [];
 
 async function j(url, opt){ const r = await fetch(API+url, opt); return r.json(); }
 function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -142,10 +180,11 @@ async function openGroup(id){
   const ms = await j(`/groups/${id}/messages`);
   ms.forEach(m=>addMsg({kind:'message.created',payload:m}));
   const mem = await j(`/groups/${id}/members`);
+  MEMBERS = mem;
   document.getElementById('memtitle').textContent = `群成员 (${mem.length})`;
   document.getElementById('memlist').innerHTML = mem.map(m=>
-    `<div class="mem"><div class="av ${m.kind==='agent'?'agent':''}">${esc(m.name[0]||'?')}<span class="dot"></span></div>
-     <div>${esc(m.name)}${m.kind==='agent'?'<span class="tag">AI</span>':''}<small>${(m.capabilities||[]).join(' · ')||'人类'}</small></div></div>`).join('');
+    `<div class="mem" onclick="showCard(event,'${esc(m.name)}')"><div class="av ${m.kind==='agent'?'agent':''}">${esc(m.name[0]||'?')}<span class="dot"></span></div>
+     <div>${esc(m.name)}${m.kind==='agent'?'<span class="tag">AI</span>':''}<small>${esc(m.persona||'')||(m.capabilities||[]).join(' · ')||'人类'}</small></div></div>`).join('');
   connectWS();
 }
 
@@ -184,7 +223,7 @@ function addMsg(e){
   const me = p.sender===ME;
   const isAgent = !me && p.sender!=='system';
   el.className = 'msg'+(me?' me':'')+(isAgent?' agent':'');
-  el.innerHTML = `<div class="avatar">${me?'沣':'🤖'}</div><div>
+  el.innerHTML = `<div class="avatar" onclick="showCard(event,'${esc(p.sender)}')">${me?'沣':'🤖'}</div><div>
     <div class="who">${esc(p.sender)}${isAgent?'<span class="tag">AI</span>':''} ${hhmm(p.created_at)}</div>
     <div class="bubble">${esc(p.text)}</div></div>`;
   document.getElementById('msgs').appendChild(el); scroll();
@@ -200,6 +239,65 @@ async function send(){
   if(r.route) addSys(`路由裁决：${r.route.responders.length} 个应答者 · ${r.route.estimated_cost}`);
 }
 document.getElementById('text').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} });
+
+// ---- QQ 式个人名片 / 人格签名 / 独立记忆 ----
+function memberOf(name){ return MEMBERS.find(m=>m.name===name); }
+function showCard(ev, name){
+  ev.stopPropagation();
+  const m = memberOf(name);
+  const isAgent = m ? m.kind==='agent' : name!=='system';
+  const sign = (m && m.persona) || '这个人很懒，什么都没写~';
+  const duty = m && m.task ? `职责：${m.task}` : '';
+  const card = document.getElementById('card');
+  card.innerHTML = `<div class="cover"></div>
+    <div class="body"><div class="cav ${isAgent?'':'human'}">${esc(name[0]||'?')}</div>
+      <div class="cinfo"><div class="cname">${esc(name)}${isAgent?'<span class="tag" style="background:#fff1e6;color:#d46b08;border-radius:3px;padding:0 4px;font-size:11px;margin-left:4px">AI</span>':''}</div>
+      <div class="cno">编号: ${m ? m.member_id.slice(0,8) : '—'}</div></div></div>
+    <div class="csign">${esc(sign)}${duty?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(duty)}</div>`:''}</div>
+    <div class="acts"><a onclick="quickMsg('${esc(name)}')">发消息</a>${isAgent?`<a onclick="editPersona('${esc(name)}')">编辑签名</a><a onclick="showMemory('${esc(name)}')">记忆</a>`:''}</div>`;
+  card.style.display='block';
+  const w=300,h=230;
+  card.style.left = Math.max(8, Math.min(ev.clientX, innerWidth-w-12))+'px';
+  card.style.top = Math.max(8, Math.min(ev.clientY, innerHeight-h-12))+'px';
+}
+document.addEventListener('click', e=>{ if(!e.target.closest('#card')) document.getElementById('card').style.display='none'; });
+function quickMsg(name){ const t=document.getElementById('text'); t.value += `@${name} `; t.focus(); document.getElementById('card').style.display='none'; }
+function closeModals(){ document.getElementById('mask').style.display='none'; }
+function openModal(html){ document.getElementById('modal').innerHTML = html; document.getElementById('mask').style.display='flex'; }
+
+function editPersona(name){
+  const m = memberOf(name); document.getElementById('card').style.display='none';
+  openModal(`<h3>编辑签名 · ${esc(name)}<span onclick="closeModals()">✕</span></h3>
+    <div class="mbody"><label>人格设定（每次委派自动注入）</label>
+    <textarea id="pf" rows="4">${esc(m.persona||'')}</textarea>
+    <label>职责 / 任务设定</label><input id="tf" value="${esc(m.task||'')}"></div>
+    <div class="mfoot"><button onclick="closeModals()">取消</button><button class="pri" onclick="savePersona('${esc(name)}','${m.member_id}')">保存</button></div>`);
+}
+async function savePersona(name, mid){
+  await j(`/groups/${gid}/members/${mid}/persona`, {method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({persona:document.getElementById('pf').value.trim(), task:document.getElementById('tf').value.trim()})});
+  closeModals(); openGroup(gid);
+}
+
+async function showMemory(name){
+  document.getElementById('card').style.display='none';
+  const items = await j(`/groups/${gid}/agents/${encodeURIComponent(name)}/memory`);
+  openModal(`<h3>${esc(name)} 的记忆（本群独立）<span onclick="closeModals()">✕</span></h3>
+    <div class="mbody" id="membody">${items.length? items.map(x=>
+      `<div class="memrow"><div class="tx">${esc(x.text)}</div><div class="del" title="遗忘" onclick="forgetMem('${esc(name)}','${x.memory_id}')">✕</div></div>`).join('')
+      : '<div style="color:#9aa1ab;font-size:13px;padding:8px 0">还没有记忆，添加一条吧~</div>'}
+    <div class="memadd"><input id="mnew" placeholder="让 TA 记住…" onkeydown="if(event.key==='Enter')rememberMem('${esc(name)}')">
+    <button class="pri" style="border:0;border-radius:4px;background:#12b7f5;color:#fff;padding:0 14px;cursor:pointer" onclick="rememberMem('${esc(name)}')">记住</button></div></div>`);
+}
+async function rememberMem(name){
+  const v = document.getElementById('mnew').value.trim(); if(!v) return;
+  await j(`/groups/${gid}/agents/${encodeURIComponent(name)}/memory`, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:v})});
+  showMemory(name);
+}
+async function forgetMem(name, mid){
+  await j(`/groups/${gid}/agents/${encodeURIComponent(name)}/memory/${mid}`, {method:'DELETE'});
+  showMemory(name);
+}
 boot();
 </script>
 </body>
