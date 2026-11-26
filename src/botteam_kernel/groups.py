@@ -1,6 +1,7 @@
 """Group / Member / Message / Thread domain over the event store (§5.4)."""
 from __future__ import annotations
 
+import time
 import uuid
 
 from .events import EventStore
@@ -23,6 +24,18 @@ class GroupService:
         self._project_new()
         return group
 
+    def update_settings(self, group_id: str, name: str | None = None, mode: str | None = None) -> dict:
+        patch = {}
+        if name is not None and name.strip():
+            patch["name"] = name.strip()
+        if mode is not None:
+            patch["mode"] = mode
+        if patch:
+            self.store.append("group.settings_set", {"group_id": group_id, **patch},
+                              idempotency_key=f"set-{group_id}-{uuid.uuid4().hex}")
+            self._project_new()
+        return self._groups[group_id]
+
     # ---- Member ----
     def add_member(self, group_id: str, kind: str, name: str, capabilities: list[str] | None = None) -> dict:
         member = {
@@ -36,6 +49,14 @@ class GroupService:
         self.store.append("member.joined", member, idempotency_key=f"member-{member['member_id']}")
         self._project_new()
         return member
+
+    def remove_member(self, group_id: str, member_id: str) -> bool:
+        if not any(m["member_id"] == member_id for m in self._members.get(group_id, [])):
+            return False
+        self.store.append("member.left", {"group_id": group_id, "member_id": member_id},
+                          idempotency_key=f"left-{member_id}-{uuid.uuid4().hex}")
+        self._project_new()
+        return True
 
     # ---- Persona（群成员人格/任务设定）----
     def set_persona(self, group_id: str, member_id: str, persona: str, task: str = "") -> dict | None:
@@ -58,6 +79,14 @@ class GroupService:
             if m["name"] == name:
                 return m.get("persona", ""), m.get("task", "")
         return "", ""
+
+    # ---- Announcement（群公告 = 该群长期系统提示，QQ 范式）----
+    def set_announcement(self, group_id: str, text: str, set_by: str = "") -> dict:
+        ann = {"text": text, "set_by": set_by, "at": time.time()}
+        self.store.append("group.announcement_set", {"group_id": group_id, **ann},
+                          idempotency_key=f"ann-{group_id}-{uuid.uuid4().hex}")
+        self._project_new()
+        return self._groups[group_id]["announcement"]
 
     # ---- Message / Thread ----
     def post_message(
@@ -141,6 +170,14 @@ class GroupService:
         if e["kind"] == "group.created":
             self._groups[p["group_id"]] = p
             self._members.setdefault(p["group_id"], [])
+        elif e["kind"] == "group.settings_set":
+            if p["group_id"] in self._groups:
+                for k in ("name", "mode"):
+                    if k in p:
+                        self._groups[p["group_id"]][k] = p[k]
+        elif e["kind"] == "member.left":
+            self._members[p["group_id"]] = [m for m in self._members.get(p["group_id"], [])
+                                            if m["member_id"] != p["member_id"]]
         elif e["kind"] == "member.joined":
             self._members.setdefault(p["group_id"], []).append(p)
         elif e["kind"] == "member.persona_set":
@@ -148,6 +185,11 @@ class GroupService:
                 if m["member_id"] == p["member_id"]:
                     m["persona"] = p["persona"]
                     m["task"] = p["task"]
+        elif e["kind"] == "group.announcement_set":
+            if p["group_id"] in self._groups:
+                self._groups[p["group_id"]]["announcement"] = {
+                    "text": p["text"], "set_by": p["set_by"], "at": p["at"]}
         elif e["kind"] == "message.created":
+            p.setdefault("created_at", e["ts"])  # 事件信封时间回填（历史消息亦可追溯）
             self._messages[p["message_id"]] = p
             self._group_seq[p["group_id"]] = max(self._group_seq.get(p["group_id"], 0), p["group_seq"])

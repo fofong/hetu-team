@@ -30,6 +30,9 @@ class TaskService:
         return msg
 
     # ---- Task ----
+    def group_tasks(self, group_id: str) -> list[dict]:
+        return [t for t in self._tasks.values() if t["group_id"] == group_id]
+
     def create_task(self, group_id: str, origin_message_id: str | None, assignee: str, title: str) -> dict:
         task = {
             "group_id": group_id,

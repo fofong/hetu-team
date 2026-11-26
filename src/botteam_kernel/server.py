@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -39,6 +39,16 @@ class MessageIn(BaseModel):
     text: str
     reply_to: str | None = None
     idempotency_key: str | None = None
+
+
+class AnnouncementIn(BaseModel):
+    text: str
+    set_by: str = ""
+
+
+class GroupSettingsIn(BaseModel):
+    name: str | None = None
+    mode: str | None = None
 
 
 class TaskIn(BaseModel):
@@ -121,16 +131,21 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     memories = MemoryService(store)
 
     def compose_prompt(gid: str, agent_name: str, task_text: str) -> str:
-        """委派 prompt = 人格 + 职责 + 召回记忆 + 任务；无设定原样（反例保护）."""
+        """委派 prompt = 群公告 + 人格 + 职责 + 召回记忆 + 任务；全空原样（反例保护）."""
         persona, duty = groups.persona_of(gid, agent_name)
-        if not persona:
+        ann = groups._groups.get(gid, {}).get("announcement")
+        parts = []
+        if ann and ann.get("text"):
+            parts.append(f"【群公告】{ann['text']}")
+        if persona:
+            parts.append(f"【你的角色设定】{persona}")
+            if duty:
+                parts.append(f"【你的职责】{duty}")
+            hits = memories.recall(gid, agent_name, task_text, limit=5)
+            if hits:
+                parts.append("【已记住的相关信息】\n" + "\n".join(f"- {h['text']}" for h in hits))
+        if not parts:
             return task_text
-        parts = [f"【你的角色设定】{persona}"]
-        if duty:
-            parts.append(f"【你的职责】{duty}")
-        hits = memories.recall(gid, agent_name, task_text, limit=5)
-        if hits:
-            parts.append("【已记住的相关信息】\n" + "\n".join(f"- {h['text']}" for h in hits))
         parts.append(f"【本次任务】{task_text}")
         return "\n\n".join(parts)
     app = FastAPI(title="Hetu Bot-team IM & Event Server")
@@ -145,6 +160,14 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     @app.get("/", include_in_schema=False)
     def index():
         return HTMLResponse(_client_html.read_text(encoding="utf-8"))
+
+    @app.get("/logo.jpg", include_in_schema=False)
+    def logo():
+        f = Path(__file__).parent / "webclient" / "logo.jpg"
+        if not f.exists():
+            raise HTTPException(status_code=404)
+        from fastapi.responses import FileResponse
+        return FileResponse(f, media_type="image/jpeg")
 
     @app.post("/groups")
     def create_group(body: GroupIn):
@@ -165,6 +188,20 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     @app.get("/groups/{gid}/messages")
     def list_messages(gid: str):
         return groups.messages(gid)
+
+    @app.post("/groups/{gid}/announcement")
+    def set_announcement(gid: str, body: AnnouncementIn):
+        return groups.set_announcement(gid, body.text, set_by=body.set_by)
+
+    @app.post("/groups/{gid}/settings")
+    def update_group_settings(gid: str, body: GroupSettingsIn):
+        return groups.update_settings(gid, name=body.name, mode=body.mode)
+
+    @app.delete("/groups/{gid}/members/{mid}")
+    def remove_member(gid: str, mid: str):
+        if not groups.remove_member(gid, mid):
+            raise HTTPException(404, "member not found")
+        return {"ok": True}
 
     @app.post("/groups/{gid}/messages")
     def post_message(gid: str, body: MessageIn):
@@ -204,6 +241,10 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     @app.post("/tasks")
     def create_task(body: TaskIn):
         return tasks.create_task(body.group_id, body.origin_message_id, body.assignee, body.title)
+
+    @app.get("/groups/{gid}/tasks")
+    def list_group_tasks(gid: str):
+        return tasks.group_tasks(gid)
 
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str):
