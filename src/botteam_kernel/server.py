@@ -32,6 +32,27 @@ class MemberIn(BaseModel):
     kind: str
     name: str
     capabilities: list[str] = []
+    response_mode: str = "mention_only"
+    keywords: list[str] = []
+
+
+class ResponseModeIn(BaseModel):
+    mode: str
+    keywords: list[str] = []
+
+
+class RecallIn(BaseModel):
+    by: str
+    side_effect: str = "none"  # none/rolled_back/irreversible（撤回≠回滚红线）
+
+
+class ReactIn(BaseModel):
+    member: str
+    emoji: str
+
+
+class PinIn(BaseModel):
+    by: str
 
 
 class MessageIn(BaseModel):
@@ -130,8 +151,8 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     approvals = ApprovalService(store)
     memories = MemoryService(store)
 
-    def compose_prompt(gid: str, agent_name: str, task_text: str) -> str:
-        """委派 prompt = 群公告 + 人格 + 职责 + 召回记忆 + 任务；全空原样（反例保护）."""
+    def compose_prompt(gid: str, agent_name: str, task_text: str, reply_to: str | None = None) -> str:
+        """委派 prompt = 群公告 + 人格 + 职责 + 召回记忆 + 引用全文 + 任务；全空原样（反例保护）."""
         persona, duty = groups.persona_of(gid, agent_name)
         ann = groups._groups.get(gid, {}).get("announcement")
         parts = []
@@ -144,6 +165,10 @@ def create_app(db_path: str, transport=None) -> FastAPI:
             hits = memories.recall(gid, agent_name, task_text, limit=5)
             if hits:
                 parts.append("【已记住的相关信息】\n" + "\n".join(f"- {h['text']}" for h in hits))
+        if reply_to:
+            q = groups.get_message(reply_to)
+            if q:
+                parts.append(f"【引用消息】{q['sender']}: {q['text']}")
         if not parts:
             return task_text
         parts.append(f"【本次任务】{task_text}")
@@ -179,15 +204,58 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
     @app.post("/groups/{gid}/members")
     def add_member(gid: str, body: MemberIn):
-        return groups.add_member(gid, kind=body.kind, name=body.name, capabilities=body.capabilities)
+        return groups.add_member(gid, kind=body.kind, name=body.name, capabilities=body.capabilities,
+                                 response_mode=body.response_mode, keywords=body.keywords)
+
+    @app.post("/groups/{gid}/members/{mid}/response_mode")
+    def set_response_mode(gid: str, mid: str, body: ResponseModeIn):
+        m = groups.set_response_mode(gid, mid, body.mode, body.keywords)
+        if m is None:
+            raise HTTPException(404, "member or mode invalid")
+        return m
 
     @app.get("/groups/{gid}/members")
     def list_members(gid: str):
         return groups.members(gid)
 
     @app.get("/groups/{gid}/messages")
-    def list_messages(gid: str):
-        return groups.messages(gid)
+    def list_messages(gid: str, q: str | None = None, sender: str | None = None):
+        return groups.messages(gid, q=q, sender=sender)
+
+    @app.post("/groups/{gid}/messages/{mid}/recall")
+    def recall_message(gid: str, mid: str, body: RecallIn):
+        status = groups.recall_message(gid, mid, body.by, body.side_effect)
+        if status == "not_found":
+            raise HTTPException(404, "message not found")
+        if status == "forbidden":
+            raise HTTPException(403, "只能撤回自己的消息")
+        if status == "already":
+            raise HTTPException(400, "消息已撤回")
+        if status == "bad_side_effect":
+            raise HTTPException(400, "side_effect 必须为 none/rolled_back/irreversible")
+        return {"ok": True}
+
+    @app.post("/groups/{gid}/messages/{mid}/react")
+    def react_message(gid: str, mid: str, body: ReactIn):
+        if not groups.react(gid, mid, body.member, body.emoji):
+            raise HTTPException(404, "message not found")
+        return {"ok": True}
+
+    @app.post("/groups/{gid}/messages/{mid}/pin")
+    def pin_message(gid: str, mid: str, body: PinIn):
+        if not groups.pin_message(gid, mid, body.by):
+            raise HTTPException(404, "message not found")
+        return {"ok": True}
+
+    @app.delete("/groups/{gid}/messages/{mid}/pin")
+    def unpin_message(gid: str, mid: str):
+        if not groups.unpin_message(gid, mid):
+            raise HTTPException(404, "pin not found")
+        return {"ok": True}
+
+    @app.get("/groups/{gid}/pins")
+    def list_pins(gid: str):
+        return groups.pins(gid)
 
     @app.post("/groups/{gid}/announcement")
     def set_announcement(gid: str, body: AnnouncementIn):
@@ -231,7 +299,24 @@ def create_app(db_path: str, transport=None) -> FastAPI:
                 name = by_id.get(rid, {}).get("name", rid)
                 if name in gateway._agents:
                     gateway.delegate(f"msg-{msg['message_id']}-{name}", name,
-                                     compose_prompt(gid, name, msg["text"]), group_id=gid)
+                                     compose_prompt(gid, name, msg["text"], reply_to=msg.get("reply_to")),
+                                     group_id=gid)
+        elif msg["sender"] not in agent_senders:
+            # 被动响应三档: 无 @ 时按成员 response_mode 触发（keyword 命中 / full 全量监听）
+            matched = [m for m in agents
+                       if m.get("response_mode") == "full"
+                       or (m.get("response_mode") == "keyword"
+                           and any(k and k in msg["text"] for k in m.get("keywords", [])))]
+            if matched:
+                route = {"responders": [m["member_id"] for m in matched], "mode": "response_mode",
+                         "estimated_cost": f"响应策略命中 {len(matched)} 个 Agent"}
+                store.append("route.decided", {"group_id": gid, "message_id": msg["message_id"], **route},
+                             idempotency_key=f"route-{msg['message_id']}")
+                for m in matched:
+                    if m["name"] in gateway._agents:
+                        gateway.delegate(f"msg-{msg['message_id']}-{m['name']}", m["name"],
+                                         compose_prompt(gid, m["name"], msg["text"], reply_to=msg.get("reply_to")),
+                                         group_id=gid)
         return {**msg, "route": route}
 
     @app.get("/groups/{gid}/events")

@@ -37,7 +37,8 @@ class GroupService:
         return self._groups[group_id]
 
     # ---- Member ----
-    def add_member(self, group_id: str, kind: str, name: str, capabilities: list[str] | None = None) -> dict:
+    def add_member(self, group_id: str, kind: str, name: str, capabilities: list[str] | None = None,
+                   response_mode: str = "mention_only", keywords: list[str] | None = None) -> dict:
         member = {
             "group_id": group_id,
             "member_id": uuid.uuid4().hex,
@@ -45,10 +46,25 @@ class GroupService:
             "name": name,
             "capabilities": capabilities or [],
             "status": "online",
+            "response_mode": response_mode,  # 被动响应三档: mention_only/keyword/full（QQ 群机器人范式）
+            "keywords": keywords or [],
         }
         self.store.append("member.joined", member, idempotency_key=f"member-{member['member_id']}")
         self._project_new()
         return member
+
+    def set_response_mode(self, group_id: str, member_id: str, mode: str,
+                          keywords: list[str] | None = None) -> dict | None:
+        if mode not in ("mention_only", "keyword", "full"):
+            return None
+        if not any(m["member_id"] == member_id for m in self._members.get(group_id, [])):
+            return None
+        self.store.append("member.response_mode_set",
+                          {"group_id": group_id, "member_id": member_id,
+                           "mode": mode, "keywords": keywords or []},
+                          idempotency_key=f"rmode-{member_id}-{uuid.uuid4().hex}")
+        self._project_new()
+        return self.member(member_id)
 
     def remove_member(self, group_id: str, member_id: str) -> bool:
         if not any(m["member_id"] == member_id for m in self._members.get(group_id, [])):
@@ -87,6 +103,58 @@ class GroupService:
                           idempotency_key=f"ann-{group_id}-{uuid.uuid4().hex}")
         self._project_new()
         return self._groups[group_id]["announcement"]
+
+    # ---- Recall / React / Pin（QQ 消息操作三件套）----
+    def recall_message(self, group_id: str, message_id: str, by: str, side_effect: str = "none") -> str:
+        """撤回红线: 必须声明副作用状态 none/rolled_back/irreversible（撤回≠回滚）。"""
+        msg = self._messages.get(message_id)
+        if msg is None or msg["group_id"] != group_id:
+            return "not_found"
+        if msg["sender"] != by:
+            return "forbidden"
+        if msg.get("recalled"):
+            return "already"
+        if side_effect not in ("none", "rolled_back", "irreversible"):
+            return "bad_side_effect"
+        self.store.append("message.recalled",
+                          {"group_id": group_id, "message_id": message_id,
+                           "by": by, "side_effect": side_effect},
+                          idempotency_key=f"recall-{message_id}")
+        self._project_new()
+        return "ok"
+
+    def react(self, group_id: str, message_id: str, member: str, emoji: str) -> bool:
+        msg = self._messages.get(message_id)
+        if msg is None or msg["group_id"] != group_id:
+            return False
+        self.store.append("message.reacted",
+                          {"group_id": group_id, "message_id": message_id,
+                           "member": member, "emoji": emoji},
+                          idempotency_key=f"react-{message_id}-{member}-{emoji}-{uuid.uuid4().hex}")
+        self._project_new()
+        return True
+
+    def pin_message(self, group_id: str, message_id: str, by: str) -> bool:
+        msg = self._messages.get(message_id)
+        if msg is None or msg["group_id"] != group_id:
+            return False
+        self.store.append("message.pinned",
+                          {"group_id": group_id, "message_id": message_id, "by": by},
+                          idempotency_key=f"pin-{message_id}-{uuid.uuid4().hex}")
+        self._project_new()
+        return True
+
+    def unpin_message(self, group_id: str, message_id: str) -> bool:
+        if message_id not in self._groups.get(group_id, {}).get("pins", []):
+            return False
+        self.store.append("message.unpinned", {"group_id": group_id, "message_id": message_id},
+                          idempotency_key=f"unpin-{message_id}-{uuid.uuid4().hex}")
+        self._project_new()
+        return True
+
+    def pins(self, group_id: str) -> list[dict]:
+        return [self._messages[mid] for mid in self._groups.get(group_id, {}).get("pins", [])
+                if mid in self._messages]
 
     # ---- Message / Thread ----
     def post_message(
@@ -127,11 +195,16 @@ class GroupService:
     def members(self, group_id: str) -> list[dict]:
         return list(self._members.get(group_id, []))
 
-    def messages(self, group_id: str) -> list[dict]:
-        return sorted(
+    def messages(self, group_id: str, q: str | None = None, sender: str | None = None) -> list[dict]:
+        out = sorted(
             (m for m in self._messages.values() if m["group_id"] == group_id),
             key=lambda m: m["group_seq"],
         )
+        if q:
+            out = [m for m in out if q in m["text"]]
+        if sender:
+            out = [m for m in out if m["sender"] == sender]
+        return out
 
     # ---- internals ----
     def _parse_mentions(self, group_id: str, text: str, raw_at_all: bool) -> dict:
@@ -185,6 +258,33 @@ class GroupService:
                 if m["member_id"] == p["member_id"]:
                     m["persona"] = p["persona"]
                     m["task"] = p["task"]
+        elif e["kind"] == "member.response_mode_set":
+            for m in self._members.get(p["group_id"], []):
+                if m["member_id"] == p["member_id"]:
+                    m["response_mode"] = p["mode"]
+                    m["keywords"] = p["keywords"]
+        elif e["kind"] == "message.recalled":
+            if p["message_id"] in self._messages:
+                self._messages[p["message_id"]]["recalled"] = True
+                self._messages[p["message_id"]]["recalled_by"] = p["by"]
+                self._messages[p["message_id"]]["side_effect"] = p["side_effect"]
+        elif e["kind"] == "message.reacted":
+            msg = self._messages.get(p["message_id"])
+            if msg is not None:
+                r = msg.setdefault("reactions", {})
+                lst = r.setdefault(p["emoji"], [])
+                if p["member"] in lst:
+                    lst.remove(p["member"])
+                else:
+                    lst.append(p["member"])
+        elif e["kind"] == "message.pinned":
+            pins = self._groups.setdefault(p["group_id"], {}).setdefault("pins", [])
+            if p["message_id"] not in pins:
+                pins.append(p["message_id"])
+        elif e["kind"] == "message.unpinned":
+            if p["group_id"] in self._groups:
+                self._groups[p["group_id"]]["pins"] = [
+                    x for x in self._groups[p["group_id"]].get("pins", []) if x != p["message_id"]]
         elif e["kind"] == "group.announcement_set":
             if p["group_id"] in self._groups:
                 self._groups[p["group_id"]]["announcement"] = {

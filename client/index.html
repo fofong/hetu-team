@@ -66,6 +66,20 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
 #annbar{background:#fff7e0;border-bottom:1px solid #f5e6bd;padding:6px 16px;font-size:12px;color:#8a6116;display:none;align-items:center;gap:8px;flex:none}
 #annbar .tx{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #annbar a{color:#b8860b;cursor:pointer;flex:none}
+#pinbar{background:#eef6ff;border-bottom:1px solid #d7e9fb;padding:6px 16px;font-size:12px;color:#146fd4;display:none;align-items:center;gap:8px;flex:none;cursor:pointer}
+#pinbar .tx{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rx{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+.rxchip{background:#f0f2f5;border:1px solid #e3e6ea;border-radius:9px;padding:1px 7px;font-size:12px;cursor:pointer;color:#456}
+.rxchip:hover{border-color:var(--qq)}
+.rxchip.mine{background:#e3f2ff;border-color:#9fd0f5;color:#146fd4}
+.recall-note{color:#9aa1ab;font-size:12px}
+.thinking .bubble{color:#57606c}
+.thinking .dots::after{content:'…';animation:dk 1s infinite}
+@keyframes dk{0%{opacity:.2}50%{opacity:1}100%{opacity:.2}}
+.srow{display:flex;gap:8px;padding:8px 4px;border-bottom:1px dashed #eef0f3;font-size:13px;cursor:pointer}
+.srow:hover{background:#f2f8ff}
+.srow .who2{color:var(--sub);flex:none;font-size:12px;width:86px;overflow:hidden;white-space:nowrap}
+.srow .tx2{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #msgs{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column}
 .msg{display:flex;gap:10px;max-width:76%;margin-bottom:14px}
 .msg.cont{margin-top:-8px}
@@ -196,15 +210,16 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
   <div id="head">
     <div class="title"><b id="gname">—</b><small id="gsub"></small></div>
     <span class="rightbox"><span class="tools">
-      <span title="搜索聊天记录" onclick="toast('UI 先行：消息搜索未接入（P1）')">🔍</span>
+      <span title="搜索聊天记录" onclick="openSearch()">🔍</span>
       <span title="聊天记录" onclick="toast('UI 先行：聊天记录面板未接入（P1）')">🕘</span>
       <span title="群设置" id="adminbtn" onclick="openAdmin()">⚙️</span>
     </span><span id="status">● <span class="on">连接中</span></span></span>
   </div>
-  <div id="annbar">📢 <span class="tx" id="anntext"></span><a onclick="openAdmin()">编辑</a><a onclick="hideAnn()">✕</a></div>
+  <div id="annbar">📢 <span class="tx" id="anntext"></span><a onclick="event.stopPropagation();openAdmin()">编辑</a><a onclick="hideAnn()">✕</a></div>
+  <div id="pinbar" onclick="if(PIN_MID)jumpMsg(PIN_MID)">📌 <span class="tx" id="pintext"></span></div>
   <div id="msgs"></div>
   <div id="inputwrap">
-    <div id="quotebar">🗨 回复 <span id="qtxt"></span><span class="x" onclick="clearReply()">✕</span></div>
+    <div id="quotebar">🗨 回复 <span id="qtxt"></span><a style="color:var(--qq);cursor:pointer;font-size:12px" onclick="quoteAsTask()">引用为任务</a><span class="x" onclick="clearReply()">✕</span></div>
     <div id="toolbar">
       <span title="表情" onclick="toggleEmoji(event)">😀</span>
       <span title="图片" onclick="toast('UI 先行：图片消息未接入（P1）')">🖼️</span>
@@ -284,19 +299,21 @@ async function loadConvs(){
   for(const g of gs){
     const ms = await j(`/groups/${g.group_id}/messages`);
     const last = ms[ms.length-1];
-    const un = ms.filter(m=>(seen[g.group_id]||0)<m.group_seq && m.sender!==ME).length;
-    items.push({g, pv: last?`${last.sender}: ${oneLine(last.text)}`:'（暂无消息）', t: last?last.created_at:'', un});
+    const unread = ms.filter(m=>(seen[g.group_id]||0)<m.group_seq && m.sender!==ME);
+    const un = unread.length;
+    const atMe = unread.some(m=>((m.mentions&&m.mentions.humans)||[]).length || m.text.includes('@'+ME) || m.text.includes('@全体'));
+    items.push({g, pv: last?`${last.sender}: ${oneLine(last.text)}`:'（暂无消息）', t: last?last.created_at:'', un, atMe});
   }
   items.sort((a,b)=>(pins[b.g.group_id]?1:0)-(pins[a.g.group_id]?1:0) || tms(b.t)-tms(a.t));
   let total=0;
-  $('pane-msg').innerHTML = items.map(({g,pv,t,un})=>{
+  $('pane-msg').innerHTML = items.map(({g,pv,t,un,atMe})=>{
     if(g.group_id!==gid && !mutes[g.group_id]) total+=un;
     const muted=!!mutes[g.group_id];
     return `<div class="conv ${g.group_id===gid?'active':''} ${pins[g.group_id]?'pinned':''}" onclick="openGroup('${g.group_id}')" oncontextmenu="convMenu(event,'${g.group_id}')">
       <div class="av">${esc((isPrivate(g)?g.name.replace(/^与/,'').replace(/的私聊$/,''):g.name)[0]||'群')}</div>
       <div class="mid"><div class="nm"><b>${esc(g.name)}</b><time>${hhmm(t)}</time></div>
       <div class="pv">${muted?'🔕 ':''}${esc(pv)}</div></div>
-      <div class="badge ${muted?'muted':''}" style="display:${un?'flex':'none'}">${un>99?'99+':un}</div></div>`;
+      <div class="badge ${muted?'muted':''}" style="display:${un?'flex':'none'}">${atMe?'@':(un>99?'99+':un)}</div></div>`;
   }).join('');
   $('msgdot').style.display = total?'block':'none';
   if(!gid && gs.length) openGroup(gs[0].group_id);
@@ -336,7 +353,8 @@ async function openGroup(id){
   const who = priv? g.name.replace(/^与/,'').replace(/的私聊$/,'') : g.name;
   $('gname').textContent = who;
   $('gsub').textContent = priv? '在线' : `群号: ${g.group_id.slice(0,8).toUpperCase()} · ${modeCN(g.mode)}`;
-  renderAnnounce();
+  $('pinbar').style.display='none'; PIN_MID=null; clearThinking();
+  renderAnnounce(); loadPins();
   const ms = await j(`/groups/${id}/messages`);
   ms.forEach(m=>addMsg({kind:'message.created',payload:m}));
   const mem = await j(`/groups/${id}/members`); MEMBERS=mem; renderMembers();
@@ -380,6 +398,10 @@ function render(e){
   else if(e.kind==='member.left')   { addSys('成员已被移出群聊'); refreshMembers(); }
   else if(e.kind==='group.settings_set'){ addSys('群信息已更新'); const g=GROUPS.find(x=>x.group_id===p.group_id); if(g){ if(p.name)g.name=p.name; if(p.mode)g.mode=p.mode; } if(p.name) $('gname').textContent=g?g.name:''; if(p.mode) $('gsub').textContent=`群号: ${gid.slice(0,8).toUpperCase()} · ${modeCN(p.mode)}`; }
   else if(e.kind && e.kind.startsWith('approval.')) addSys(`审批${{requested:'已发起',approved:'已通过',refused:'已拒绝',executed:'已执行',expired:'已过期'}[e.kind.split('.')[1]]||e.kind}：${p.title||p.approval_id||''}`);
+  else if(e.kind==='message.recalled'){ if(MSGS[p.message_id]) Object.assign(MSGS[p.message_id],{recalled:true,recalled_by:p.by,side_effect:p.side_effect}); if(p.group_id===gid) applyRecallDom(p.message_id); }
+  else if(e.kind==='message.reacted'){ if(p.group_id===gid) setTimeout(()=>applyReactDom(p.message_id),50); }
+  else if(e.kind==='message.pinned'||e.kind==='message.unpinned'){ if(p.group_id===gid) loadPins(); }
+  if(e.kind==='message.created' && p.sender!==ME && p.sender!=='system') clearThinking();
 }
 function touchConvPreview(p){
   const el = document.querySelector(`#pane-msg .conv[onclick="openGroup('${gid}')"] .pv`);
@@ -389,9 +411,20 @@ function touchConvPreview(p){
 // ---- 消息渲染 ----
 let lastTimeCut=0, lastSender=null, lastSenderT=0;
 function hl(text){ let s=esc(text); s=s.replace(/@([A-Za-z0-9_\u4e00-\u9fa5]+)/g,'<span class="at">@$1</span>'); return s.replace(/\n/g,'<br>'); }
+const SE_CN={none:'仅隐藏文本',rolled_back:'副作用已回滚',irreversible:'⚠ 副作用无法回滚'};
+function rxHtml(m){
+  const rx=m.reactions||{}; const keys=Object.keys(rx).filter(k=>rx[k].length);
+  if(!keys.length) return '';
+  return `<div class="rx">${keys.map(k=>`<span class="rxchip ${rx[k].includes(ME)?'mine':''}" onclick="event.stopPropagation();reactTo('${m.message_id}','${k}')">${k}×${rx[k].length}</span>`).join('')}</div>`;
+}
+function bubbleHtml(m){
+  if(m.recalled) return `<div class="bubble recall-note">⚠️ 「${esc(oneLine(m.text))}」由 ${esc(m.recalled_by||'')} 撤回 · ${SE_CN[m.side_effect]||m.side_effect||''}</div>`;
+  const q = m.reply_to && MSGS[m.reply_to] ? `<div class="quote" onclick="jumpMsg('${m.reply_to}')">回复 ${esc(MSGS[m.reply_to].sender)}: ${esc(oneLine(MSGS[m.reply_to].text))}</div>` : '';
+  return `<div class="bubble" oncontextmenu="msgMenu(event,'${m.message_id}')">${q}${hl(m.text)}</div>${rxHtml(m)}`;
+}
 function addMsg(e){
   const p=e.payload; if(!p.message_id) return;
-  MSGS[p.message_id]={sender:p.sender,text:p.text};
+  MSGS[p.message_id]=p;
   const el=document.createElement('div');
   const t=tms(p.created_at);
   let cut=false;
@@ -401,15 +434,26 @@ function addMsg(e){
     $('msgs').appendChild(c);
   }
   const me=p.sender===ME, isAgent=!me&&p.sender!=='system';
-  const cont=!cut && p.sender===lastSender && t && (t-lastSenderT)<300000;
+  const cont=!cut && p.sender===lastSender && t && (t-lastSenderT)<300000 && !p.recalled;
   lastSender=p.sender; lastSenderT=t;
   el.className='msg'+(me?' me':'')+(isAgent?' agent':'')+(cont?' cont':'');
   el.dataset.mid=p.message_id;
-  const q = p.reply_to && MSGS[p.reply_to] ? `<div class="quote" onclick="jumpMsg('${p.reply_to}')">回复 ${esc(MSGS[p.reply_to].sender)}: ${esc(oneLine(MSGS[p.reply_to].text))}</div>` : '';
   el.innerHTML=`<div class="avatar" onclick="showCard(event,'${esc(p.sender)}')">${me?'沣':'🤖'}</div><div class="c">
     <div class="who">${esc(p.sender)}${isAgent?'<span class="tag">AI</span>':''} <time>${hhmm(p.created_at)}</time><a class="more" onclick="msgMenu(event,'${p.message_id}')">⋯</a></div>
-    <div class="bubble" oncontextmenu="msgMenu(event,'${p.message_id}')">${q}${hl(p.text)}</div></div>`;
+    ${bubbleHtml(p)}</div>`;
   $('msgs').appendChild(el); scroll();
+}
+function applyRecallDom(mid){
+  const m=MSGS[mid]; if(!m) return;
+  const el=document.querySelector(`.msg[data-mid="${mid}"]`); if(!el) return;
+  el.querySelector('.c').innerHTML=`<div class="who">${esc(m.sender)} <time>${hhmm(m.created_at)}</time></div>${bubbleHtml(m)}`;
+}
+function applyReactDom(mid){
+  const m=MSGS[mid]; if(!m) return;
+  const el=document.querySelector(`.msg[data-mid="${mid}"]`); if(!el) return;
+  const old=el.querySelector('.rx'); if(old) old.remove();
+  const tmp=document.createElement('div'); tmp.innerHTML=rxHtml(m);
+  if(tmp.firstChild) el.querySelector('.c').appendChild(tmp.firstChild);
 }
 function addSys(t){ const el=document.createElement('div'); el.className='msg sys'; el.innerHTML=`<div class="bubble">${esc(t)}</div>`; $('msgs').appendChild(el); scroll(); }
 function scroll(){ const m=$('msgs'); m.scrollTop=m.scrollHeight; }
@@ -418,13 +462,91 @@ function jumpMsg(id){ const el=document.querySelector(`.msg[data-mid="${id}"]`);
 // ---- 消息菜单 / 引用 ----
 function msgMenu(ev, mid){
   ev.preventDefault(); ev.stopPropagation();
-  const items=['复制','回复','撤回'];
+  const m=MSGS[mid]||{};
+  const pinned=(GROUPS.find(g=>g.group_id===gid)||{}).pins?.includes(mid);
+  const items=['复制','回复','👍 赞同','✅ 完成','👀 收到','🙅 打回',pinned?'取消置顶':'置顶',`转发到${priv?'群':'会话'}`];
+  if(m.sender===ME && !m.recalled) items.push('撤回');
   showCtx(ev, items, i=>{
-    if(i===0){ navigator.clipboard.writeText(MSGS[mid]?MSGS[mid].text:''); toast('已复制'); }
-    if(i===1) setReply(mid);
-    if(i===2) toast('撤回需声明副作用状态（P1 未接入）');
+    const t=items[i];
+    if(t==='复制'){ navigator.clipboard.writeText(m.text||''); toast('已复制'); }
+    if(t==='回复') setReply(mid);
+    if(['👍 赞同','✅ 完成','👀 收到','🙅 打回'].includes(t)) reactTo(mid, t.split(' ')[0]);
+    if(t==='置顶') pinMsg(mid);
+    if(t==='取消置顶') unpinMsg(mid);
+    if(t.startsWith('转发到')) forwardMsg(mid);
+    if(t==='撤回') recallDialog(mid);
   });
 }
+async function reactTo(mid, emoji){
+  await jp(`/groups/${gid}/messages/${mid}/react`,{member:ME,emoji});
+  const m=MSGS[mid]; if(m){ const rx=m.reactions=m.reactions||{}; const l=rx[emoji]=rx[emoji]||[];
+    const i=l.indexOf(ME); if(i>=0) l.splice(i,1); else l.push(ME); }
+  applyReactDom(mid);
+}
+async function pinMsg(mid){ await jp(`/groups/${gid}/messages/${mid}/pin`,{by:ME}); loadPins(); toast('已置顶'); }
+async function unpinMsg(mid){ await fetch(`${API}/groups/${gid}/messages/${mid}/pin`,{method:'DELETE'}); loadPins(); toast('已取消置顶'); }
+let PIN_MID=null;
+async function loadPins(){
+  if(!gid){ return; }
+  const ps=await j(`/groups/${gid}/pins`);
+  const g=GROUPS.find(x=>x.group_id===gid); if(g) g.pins=ps.map(p=>p.message_id);
+  PIN_MID = ps.length? ps[ps.length-1].message_id : null;
+  $('pinbar').style.display = ps.length?'flex':'none';
+  if(ps.length){ const p=ps[ps.length-1]; $('pintext').textContent=`${p.sender}: ${oneLine(p.text)}${ps.length>1?`（共 ${ps.length} 条）`:''}`; }
+}
+function recallDialog(mid){
+  openModal(`<h3>撤回消息<span onclick="closeModals()">✕</span></h3><div class="mbody">
+    <div style="font-size:13px;color:#57606c;margin-bottom:6px">「${esc(oneLine(MSGS[mid].text))}」</div>
+    <label>副作用状态声明（红线：撤回≠回滚）</label>
+    <select id="rse"><option value="none">仅隐藏文本（无副作用）</option><option value="rolled_back">副作用已回滚</option><option value="irreversible">副作用无法回滚</option></select></div>
+    <div class="mfoot"><button onclick="closeModals()">取消</button><button class="pri" onclick="doRecall('${mid}')">撤回</button></div>`);
+}
+async function doRecall(mid){
+  const se=$('rse').value;
+  const r=await fetch(`${API}/groups/${gid}/messages/${mid}/recall`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:ME,side_effect:se})});
+  closeModals();
+  if(!r.ok){ toast((await r.json()).detail||'撤回失败'); return; }
+  Object.assign(MSGS[mid],{recalled:true,recalled_by:ME,side_effect:se});
+  applyRecallDom(mid);
+}
+function forwardMsg(mid){
+  const m=MSGS[mid];
+  const targets=GROUPS.filter(g=>g.group_id!==gid);
+  if(!targets.length) return toast('没有其他会话可转发');
+  openModal(`<h3>转发消息到<span onclick="closeModals()">✕</span></h3><div class="mbody">
+    <div style="font-size:12px;color:#9aa1ab;margin-bottom:8px">「${esc(oneLine(m.text))}」</div>
+    ${targets.map(g=>`<div class="srow" onclick="doForward('${mid}','${g.group_id}')"><div class="tx2">${esc(g.name)}</div></div>`).join('')}</div>`);
+}
+async function doForward(mid, targetGid){
+  const m=MSGS[mid];
+  const prefix = priv && !isPrivate(GROUPS.find(g=>g.group_id===targetGid)||{name:''}) ? '【私聊转发】' : '【转发】';
+  await jp(`/groups/${targetGid}/messages`,{sender:ME,text:`${prefix} ${m.text}`,idempotency_key:'fwd-'+Date.now()+'-'+Math.random().toString(16).slice(2)});
+  closeModals(); toast('已转发');
+}
+// ---- 消息搜索 ----
+function openSearch(){
+  openModal(`<h3>搜索聊天记录 · ${esc($('gname').textContent)}<span onclick="closeModals()">✕</span></h3>
+    <div class="mbody"><input id="sq" placeholder="输入关键词，回车搜索" onkeydown="if(event.key==='Enter')runSearch()">
+    <div id="sres" style="margin-top:8px;max-height:320px;overflow-y:auto"></div></div>`);
+  $('sq').focus();
+}
+async function runSearch(){
+  const q=$('sq').value.trim(); if(!q) return;
+  const hits=await j(`/groups/${gid}/messages?q=${encodeURIComponent(q)}`);
+  $('sres').innerHTML = hits.length? hits.slice(-50).reverse().map(m=>
+    `<div class="srow" onclick="closeModals();jumpMsg('${m.message_id}')"><div class="who2">${esc(m.sender)} ${hhmm(m.created_at)}</div><div class="tx2">${esc(oneLine(m.text))}</div></div>`).join('')
+    : '<div style="color:#9aa1ab;font-size:13px;padding:8px 0">无结果</div>';
+}
+// ---- 执行中状态条（把黑盒等待变可见进度）----
+let thinkEl=null, thinkTimer=null;
+function showThinking(n){
+  clearThinking();
+  thinkEl=document.createElement('div'); thinkEl.className='msg sys thinking';
+  thinkEl.innerHTML=`<div class="bubble">🤖 ${n} 个 Agent 已入队，正在思考<span class="dots"></span></div>`;
+  $('msgs').appendChild(thinkEl); scroll();
+  thinkTimer=setTimeout(clearThinking,180000);
+}
+function clearThinking(){ if(thinkTimer) clearTimeout(thinkTimer); if(thinkEl){ thinkEl.remove(); thinkEl=null; } }
 function setReply(mid){ const m=MSGS[mid]; if(!m) return; REPLY={id:mid,...m}; renderQuote(); $('text').focus(); }
 function clearReply(){ REPLY=null; renderQuote(); }
 function renderQuote(){
@@ -459,6 +581,7 @@ async function send(){
   if(REPLY) body.reply_to=REPLY.id;
   const r=await jp(`/groups/${gid}/messages`, body);
   if(r.route) addSys(`路由裁决：${r.route.responders.length} 个应答者 · ${r.route.estimated_cost}`);
+  if(r.route && r.route.responders && r.route.responders.length) showThinking(r.route.responders.length);
   clearReply();
 }
 $('text').addEventListener('keydown', e=>{
@@ -600,6 +723,14 @@ async function createTask(){
   closeModals(); renderTasks(); toast('任务已创建（入队）');
 }
 async function acceptTask(id){ await jp(`/tasks/${id}/accept`,{accepted_by:ME}); renderTasks(); toast('已验收'); }
+async function quoteAsTask(){
+  if(!REPLY) return;
+  const agents=MEMBERS.filter(m=>m.kind==='agent');
+  if(!agents.length) return toast('群里还没有 Agent 可指派');
+  const title=oneLine(REPLY.text).slice(0,60);
+  await jp('/tasks',{group_id:gid,assignee:agents[0].name,title:`[引用] ${title}`});
+  clearReply(); toast(`已引用为任务 → ${agents[0].name}`);
+}
 
 // ---- 群管理 ----
 function openAdmin(){
@@ -615,7 +746,7 @@ function openAdmin(){
     <h4>群成员 (${MEMBERS.length})</h4>
     <div id="adminmems">${MEMBERS.map(m=>`<div class="arow">
       <div class="nm2">${esc(m.name)}${m.kind==='agent'?'<span class="tag">AI</span>':''}<br><small>${esc(m.persona||m.task||(m.kind==='agent'?'Agent':'人类'))}</small></div>
-      ${m.kind==='agent'?`<button class="btn-s" onclick="editPersona('${esc(m.name)}')">人格/职责</button><button class="btn-s" onclick="showMemory('${esc(m.name)}')">记忆</button>`:''}
+      ${m.kind==='agent'?`<button class="btn-s" onclick="editPersona('${esc(m.name)}')">人格/职责</button><button class="btn-s" onclick="showMemory('${esc(m.name)}')">记忆</button><button class="btn-s" onclick="respMode('${esc(m.name)}','${m.member_id}','${m.response_mode||'mention_only'}','${esc((m.keywords||[]).join(','))}')">响应策略</button>`:''}
       <button class="btn-s danger" onclick="removeMember('${m.member_id}','${esc(m.name)}')">移除</button></div>`).join('')}</div>
     <div class="memadd"><input id="admnewname" placeholder="新成员名字"><select id="admnewkind" style="width:90px"><option value="agent">Bot</option><option value="human">真人</option></select>
     <button class="btn-s pri" onclick="addMember()">添加</button></div>
@@ -639,6 +770,25 @@ async function removeMember(mid,name){
   const r=await fetch(`${API}/groups/${gid}/members/${mid}`,{method:'DELETE'});
   if(r.ok){ await refreshMembers(); openAdmin(); toast('已移除'); } else toast('移除失败');
 }
+function respMode(name,mid,cur,kws){
+  openModal(`<h3>响应策略 · ${esc(name)}<span onclick="closeModals()">✕</span></h3><div class="mbody">
+    <label>被动响应档位（QQ 群机器人范式）</label>
+    <select id="rmsel" onchange="document.getElementById('rmkwbox').style.display=this.value==='keyword'?'':'none'">
+      <option value="mention_only" ${cur==='mention_only'?'selected':''}>仅被 @ 时响应</option>
+      <option value="keyword" ${cur==='keyword'?'selected':''}>命中关键词时响应</option>
+      <option value="full" ${cur==='full'?'selected':''}>全量监听（每条消息都响应）</option>
+    </select>
+    <div id="rmkwbox" ${cur==='keyword'?'':'style="display:none"'}><label>关键词（逗号分隔）</label>
+    <input id="rmkw" value="${esc(kws)}" placeholder="如：报表,日报"></div>
+  </div><div class="mfoot"><button onclick="closeModals()">取消</button><button class="pri" onclick="saveRespMode('${esc(name)}','${mid}')">保存</button></div>`);
+}
+async function saveRespMode(name,mid){
+  const mode=$('rmsel').value;
+  const keywords=mode==='keyword'? $('rmkw').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean) : [];
+  if(mode==='keyword'&&!keywords.length) return toast('请至少填一个关键词');
+  await jp(`/groups/${gid}/members/${mid}/response_mode`,{mode,keywords});
+  await refreshMembers(); closeModals(); toast(`${name} 响应策略已更新`);
+}
 
 // ---- 个人名片 / 人格 / 记忆 ----
 function memberOf(name){ return MEMBERS.find(m=>m.name===name); }
@@ -652,22 +802,33 @@ function memMenu(ev,name,mid){
     if(i===4) removeMember(mid,name);
   });
 }
-function showCard(ev, name){
+async function showCard(ev, name){
   ev.stopPropagation();
   const m=memberOf(name);
   const isAgent=m?m.kind==='agent':name!=='system';
   const sign=(m&&m.persona)||'这个人很懒，什么都没写~';
   const duty=m&&m.task?`职责：${m.task}`:'';
+  const caps=m&&(m.capabilities||[]).length?`能力：${m.capabilities.join(' · ')}`:'';
+  const RM_CN={mention_only:'仅被@时响应',keyword:'关键词触发',full:'全量监听'};
+  let curTask='当前任务：无', rmLine='';
+  if(isAgent && m && gid){
+    try{
+      const ts=await j(`/groups/${gid}/tasks`);
+      const act=ts.find(t=>t.assignee===name && (t.status==='running'||t.status==='queued'));
+      if(act) curTask=`当前任务：${act.title}（${ST_CN[act.status]||act.status}）`;
+    }catch(e){}
+    if(m.response_mode) rmLine=`响应策略：${RM_CN[m.response_mode]||m.response_mode}${m.response_mode==='keyword'&&m.keywords&&m.keywords.length?`（${m.keywords.join('、')}）`:''}`;
+  }
   const card=$('card');
   card.innerHTML=`<div class="cover"></div>
     <div class="body"><div class="cav ${isAgent?'':'human'}">${esc(name[0]||'?')}</div>
       <div class="cinfo"><div class="cname">${esc(name)}${isAgent?'<span class="tag">AI</span>':''}</div>
       <div class="cno">编号: ${m?m.member_id.slice(0,8):'—'}</div></div></div>
-    <div class="csign">${esc(sign)}${duty?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(duty)}</div>`:''}</div>
+    <div class="csign">${esc(sign)}${duty?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(duty)}</div>`:''}${caps?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(caps)}</div>`:''}${curTask?`<div style="color:${curTask==='当前任务：无'?'#9aa1ab':'#146fd4'};font-size:12px;margin-top:4px">${esc(curTask)}</div>`:''}${rmLine?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(rmLine)}</div>`:''}</div>
     <div class="acts"><a onclick="quickMsg('${esc(name)}')">发消息</a>${isAgent?`<a onclick="editPersona('${esc(name)}')">编辑签名</a><a onclick="showMemory('${esc(name)}')">记忆</a>`:''}</div>`;
   card.style.display='block';
   card.style.left=Math.max(8,Math.min(ev.clientX,innerWidth-312))+'px';
-  card.style.top=Math.max(8,Math.min(ev.clientY,innerHeight-242))+'px';
+  card.style.top=Math.max(8,Math.min(ev.clientY,innerHeight-300))+'px';
 }
 function quickMsg(name){ const t=$('text'); t.value+=`@${name} `; t.focus(); $('card').style.display='none'; }
 function closeModals(){ $('mask').style.display='none'; }
