@@ -102,7 +102,7 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
 </div>
 <div id="members"><h2 id="memtitle">群成员</h2><div id="memlist"></div></div>
 <script>
-const API = new URLSearchParams(location.search).get('server') || 'http://10.66.10.2:8877';
+const API = new URLSearchParams(location.search).get('server') || (location.port === '8877' ? location.origin : 'http://10.66.10.2:8877');
 const ME = '沣锅';
 let gid = null, lastSeq = 0, ws = null;
 
@@ -168,6 +168,8 @@ function render(e){
   else if(e.kind==='run.completed') addSys(`执行完成（待验收）：${p.result||''}`);
   else if(e.kind==='task.accepted') addSys(`任务已验收 ✔ by ${p.accepted_by}`);
   else if(e.kind==='budget.exceeded') addSys(`⛔ 预算超限强制停止：${p.agent_id} ${p.dimension}=${p.limit}`);
+  else if(e.kind==='handoff.accepted') addSys(`结构化交接：${p.from} → ${(p.targets||[]).join('、')}`);
+  else if(e.kind && e.kind.startsWith('approval.')) addSys(`审批${{requested:'已发起',approved:'已通过',refused:'已拒绝',executed:'已执行',expired:'已过期'}[e.kind.split('.')[1]]||e.kind}：${p.title||p.approval_id||''}`);
 }
 
 let lastTimeCut = 0;

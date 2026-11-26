@@ -47,14 +47,16 @@ class A2AGateway:
         return self._agents.get(agent_id)
 
     # ---- delegation ----
-    def delegate(self, botteam_task_id: str, agent_id: str, prompt: str, group_id: str | None = None) -> dict:
+    def delegate(self, botteam_task_id: str, agent_id: str, prompt: str, group_id: str | None = None,
+                 ctx: dict | None = None) -> dict:
         agent = self._agents.get(agent_id)
         if agent is None:
             raise ValueError(f"agent not registered: {agent_id}")
         a2a_task_id = uuid.uuid4().hex
         poll_mode = not agent["endpoint"]
         mapping = {"botteam_task_id": botteam_task_id, "a2a_task_id": a2a_task_id,
-                   "agent_id": agent_id, "prompt": prompt, "queued": poll_mode, "group_id": group_id}
+                   "agent_id": agent_id, "prompt": prompt, "queued": poll_mode, "group_id": group_id,
+                   "ctx": ctx}
         self.store.append("delegation.created", mapping, idempotency_key=f"deleg-{botteam_task_id}")
         self._index(mapping)
         if poll_mode:

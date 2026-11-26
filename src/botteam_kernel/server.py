@@ -9,7 +9,7 @@ import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from .arbitration import Arbiter
@@ -17,6 +17,8 @@ from .authz import AuthorizationSystem
 from .events import EventStore
 from .gateway import A2AGateway
 from .groups import GroupService
+from .handoff import HandoffService
+from .approvals import ApprovalService
 from .tasks import TaskService
 
 
@@ -68,12 +70,32 @@ class DelegateIn(BaseModel):
     botteam_task_id: str
     agent_id: str
     prompt: str
+    group_id: str | None = None
 
 
 class CallbackIn(BaseModel):
     a2a_task_id: str
     state: str
     result: str | None = None
+    handoff: list[dict] | None = None  # 结构化交接: [{"agent","task"}]，受护栏约束
+
+
+class ApprovalReqIn(BaseModel):
+    requester: str
+    tool: str
+    args: dict = {}
+    title: str
+    why: str
+
+
+class ApprovalDecideIn(BaseModel):
+    approver: str
+    approve: bool
+
+
+class ApprovalConsumeIn(BaseModel):
+    tool: str
+    args: dict = {}
 
 
 def create_app(db_path: str, transport=None) -> FastAPI:
@@ -83,6 +105,8 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     arbiter = Arbiter()
     authz = AuthorizationSystem()
     gateway = A2AGateway(store, transport=transport) if transport is not None else A2AGateway(store)
+    handoffs = HandoffService(store)
+    approvals = ApprovalService(store)
     app = FastAPI(title="Hetu Bot-team IM & Event Server")
     from fastapi.middleware.cors import CORSMiddleware
 
@@ -124,8 +148,12 @@ def create_app(db_path: str, transport=None) -> FastAPI:
         )
         group = groups._groups[gid]
         agents = [m for m in groups.members(gid) if m["kind"] == "agent"]
+        # 防互聊铁律: Agent 消息只展示不触发（TeamAgentX 借鉴）——sender 是群内 agent 或网关注册 agent 即拦截
+        agent_senders = {m["name"] for m in agents} | set(gateway._agents)
+        if msg["sender"] not in agent_senders:
+            handoffs.human_message(gid)  # 铁律: 人类发言清零一切自动调度
         route = None
-        if msg["mentions"]["agents"]:
+        if msg["mentions"]["agents"] and msg["sender"] not in agent_senders:
             responders = arbiter.decide(group["mode"], msg, agents)
             route = {
                 "responders": responders,
@@ -178,7 +206,7 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     @app.post("/gateway/delegate")
     def delegate(body: DelegateIn):
         try:
-            return gateway.delegate(body.botteam_task_id, body.agent_id, body.prompt)
+            return gateway.delegate(body.botteam_task_id, body.agent_id, body.prompt, group_id=body.group_id)
         except ValueError as e:
             from fastapi.responses import JSONResponse
 
@@ -196,6 +224,14 @@ def create_app(db_path: str, transport=None) -> FastAPI:
         if body.state == "completed" and body.result and d.get("group_id"):
             groups.post_message(d["group_id"], sender=d["agent_id"], text=body.result,
                                 idempotency_key=f"a2a-reply-{body.a2a_task_id}")
+        # 接线: 结构化交接 → 护栏裁决后派发下一棒（自由文本 @ 永不触发，见防互聊铁律）
+        if body.state == "completed" and body.handoff and d.get("group_id"):
+            ctx = d.get("ctx") or {"root": d["botteam_task_id"], "depth": 0, "lineage": [d["agent_id"]]}
+            out = handoffs.handoff(d["group_id"], from_agent=d["agent_id"], targets=body.handoff, ctx=ctx)
+            for t in out["accepted"]:
+                gateway.delegate(f"handoff-{body.a2a_task_id}-{t['agent']}", t["agent"], t["task"],
+                                 group_id=d["group_id"], ctx=out["next_ctx"])
+            return {**d, "handoff_result": out}
         return d
 
     @app.get("/gateway/agents/{agent_id}/pending")
@@ -209,6 +245,30 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
             return JSONResponse({"error": "not found"}, status_code=404)
         return gateway._delegations[bt_task_id]
+
+    # ---- 审批闸门 endpoints ----
+    @app.post("/groups/{gid}/approvals")
+    def request_approval(gid: str, body: ApprovalReqIn):
+        return approvals.request(gid, requester=body.requester, tool=body.tool, args=body.args,
+                                 title=body.title, why=body.why)
+
+    @app.get("/groups/{gid}/approvals")
+    def list_approvals(gid: str):
+        return approvals.list_for(gid)
+
+    @app.post("/approvals/{aid}/decide")
+    def decide_approval(aid: str, body: ApprovalDecideIn):
+        try:
+            return approvals.decide(aid, approver=body.approver, approve=body.approve)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @app.post("/approvals/{aid}/consume")
+    def consume_approval(aid: str, body: ApprovalConsumeIn):
+        try:
+            return approvals.consume(aid, tool=body.tool, args=body.args)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
     @app.websocket("/ws/{gid}")
     async def ws_events(websocket: WebSocket, gid: str, last_seq: int = 0):
