@@ -25,6 +25,9 @@ class GroupService:
         return group
 
     def update_settings(self, group_id: str, name: str | None = None, mode: str | None = None) -> dict:
+        from .arbitration import MODES
+        if mode is not None and mode not in MODES:
+            raise ValueError(f"unknown mode {mode}")
         patch = {}
         if name is not None and name.strip():
             patch["name"] = name.strip()
@@ -165,6 +168,7 @@ class GroupService:
         reply_to: str | None = None,
         idempotency_key: str | None = None,
         raw_at_all: bool = False,
+        attachments: list[dict] | None = None,
     ) -> dict:
         key = idempotency_key or f"msg-{uuid.uuid4().hex}"
         existing = self._find_by_key(key)
@@ -182,6 +186,8 @@ class GroupService:
             "group_seq": seq,
             "mentions": self._parse_mentions(group_id, text, raw_at_all),
         }
+        if attachments:
+            msg["attachments"] = attachments
         self.store.append("message.created", msg, idempotency_key=key)
         self._project_new()
         return msg

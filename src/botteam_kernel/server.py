@@ -9,7 +9,7 @@ import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from .arbitration import Arbiter
@@ -20,6 +20,8 @@ from .groups import GroupService
 from .handoff import HandoffService
 from .approvals import ApprovalService
 from .memory import MemoryService
+from .friends import FriendService
+from .files import FileStore
 from .tasks import TaskService
 
 
@@ -60,6 +62,18 @@ class MessageIn(BaseModel):
     text: str
     reply_to: str | None = None
     idempotency_key: str | None = None
+    attachments: list[dict] | None = None
+
+
+class FriendIn(BaseModel):
+    name: str
+    kind: str = "human"
+
+
+class FileIn(BaseModel):
+    name: str
+    data_b64: str
+    content_type: str = ""
 
 
 class AnnouncementIn(BaseModel):
@@ -150,6 +164,8 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     handoffs = HandoffService(store)
     approvals = ApprovalService(store)
     memories = MemoryService(store)
+    friends = FriendService(store)
+    files = FileStore(Path(db_path).parent / "files")
 
     def compose_prompt(gid: str, agent_name: str, task_text: str, reply_to: str | None = None) -> str:
         """委派 prompt = 群公告 + 人格 + 职责 + 召回记忆 + 引用全文 + 任务；全空原样（反例保护）."""
@@ -200,7 +216,12 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
     @app.get("/groups")
     def list_groups():
-        return list(groups._groups.values())
+        out = []
+        for g in groups._groups.values():
+            d = dict(g)
+            d["members_count"] = len(groups.members(g["group_id"]))
+            out.append(d)
+        return out
 
     @app.post("/groups/{gid}/members")
     def add_member(gid: str, body: MemberIn):
@@ -263,7 +284,12 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
     @app.post("/groups/{gid}/settings")
     def update_group_settings(gid: str, body: GroupSettingsIn):
-        return groups.update_settings(gid, name=body.name, mode=body.mode)
+        if gid not in groups._groups:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        try:
+            return groups.update_settings(gid, name=body.name, mode=body.mode)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
     @app.delete("/groups/{gid}/members/{mid}")
     def remove_member(gid: str, mid: str):
@@ -273,9 +299,14 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
     @app.post("/groups/{gid}/messages")
     def post_message(gid: str, body: MessageIn):
+        if body.attachments:
+            for a in body.attachments:
+                if not files.exists(a.get("file_id", "")):
+                    return JSONResponse({"error": f"unknown file_id {a.get('file_id')}"}, status_code=400)
         msg = groups.post_message(
             gid, sender=body.sender, text=body.text,
             reply_to=body.reply_to, idempotency_key=body.idempotency_key,
+            attachments=body.attachments,
         )
         group = groups._groups[gid]
         agents = [m for m in groups.members(gid) if m["kind"] == "agent"]
@@ -399,6 +430,54 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
             return JSONResponse({"error": "not found"}, status_code=404)
         return gateway._delegations[bt_task_id]
+
+    # ---- 好友 / 文件 endpoints ----
+    @app.get("/friends")
+    def list_friends():
+        return friends.list()
+
+    @app.post("/friends")
+    def add_friend(body: FriendIn):
+        try:
+            return friends.add(body.name, kind=body.kind)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @app.delete("/friends/{name}")
+    def remove_friend(name: str):
+        return {"removed": friends.remove(name)}
+
+    @app.post("/files")
+    def upload_file(body: FileIn):
+        import base64 as b64
+        try:
+            data = b64.b64decode(body.data_b64)
+        except Exception:
+            return JSONResponse({"error": "bad base64"}, status_code=400)
+        try:
+            return files.save(body.name, data, body.content_type)
+        except ValueError:
+            return JSONResponse({"error": "file too large (max 10MB)"}, status_code=413)
+
+    @app.get("/files/{fid}")
+    def download_file(fid: str):
+        got = files.load(fid)
+        if got is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        path, name, mime = got
+        from urllib.parse import quote
+        return FileResponse(path, media_type=mime,
+                            headers={"content-disposition": f"inline; filename*=UTF-8''{quote(name)}"})
+
+    @app.get("/groups/{gid}/files")
+    def group_files(gid: str):
+        out, seen = [], set()
+        for m in reversed(groups.messages(gid)):
+            for a in m.get("attachments") or []:
+                if a.get("file_id") not in seen:
+                    seen.add(a.get("file_id"))
+                    out.append(a)
+        return out
 
     # ---- 人格 / 记忆 endpoints ----
     @app.post("/groups/{gid}/members/{mid}/persona")

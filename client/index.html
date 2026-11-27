@@ -189,6 +189,19 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
 #ctx div:hover{background:#eef4fb}
 /* toast */
 #toast{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);background:rgba(30,35,45,.88);color:#fff;border-radius:6px;padding:8px 18px;font-size:13px;display:none;z-index:90}
+  .att-img img{max-width:260px;border-radius:8px;display:block;margin:4px 0;cursor:zoom-in}
+  .att-file{display:flex;gap:10px;align-items:center;background:#f7f8fa;border:1px solid var(--bd);border-radius:8px;padding:8px 12px;margin:4px 0;min-width:190px}
+  .att-file b{font-size:13px}
+  .att-file small{color:var(--fg3);margin-left:8px}
+  .att-file a{margin-left:auto;color:var(--blue);text-decoration:none;font-size:15px}
+  .me-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--bd);cursor:pointer}
+  .me-row:hover{background:#f7f8fa}
+  .me-row .av{width:36px;height:36px;border-radius:7px;background:linear-gradient(135deg,#12b7f5,#6c5ce7);color:#fff;display:grid;place-items:center;font-size:15px;font-weight:600}
+  .me-row small{display:block;color:var(--fg3);font-size:11px}
+  .frow.sel{background:#e8f4fd}
+  .frow small{display:block;color:var(--fg3);font-size:11px}
+  .sec .fold{display:inline-block;width:12px;color:var(--fg3);font-size:9px;transition:transform .15s}
+  .sec.folded .fold{transform:rotate(-90deg)}
 </style>
 </head>
 <body>
@@ -222,10 +235,11 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
     <div id="quotebar">🗨 回复 <span id="qtxt"></span><a style="color:var(--qq);cursor:pointer;font-size:12px" onclick="quoteAsTask()">引用为任务</a><span class="x" onclick="clearReply()">✕</span></div>
     <div id="toolbar">
       <span title="表情" onclick="toggleEmoji(event)">😀</span>
-      <span title="图片" onclick="toast('UI 先行：图片消息未接入（P1）')">🖼️</span>
-      <span title="文件" onclick="toast('UI 先行：文件消息未接入（P1）')">📁</span>
+      <span title="图片" onclick="pickFile('image/*')">🖼️</span>
+      <span title="文件" onclick="pickFile('')">📁</span>
       <span title="截图" onclick="toast('UI 先行：截图未接入（P2）')">✂️</span>
-      <span title="语音" onclick="toast('UI 先行：语音消息未接入（P2）')">🎤</span>
+      <span title="语音" onclick="toast('UI 先行：语音未接入（P2）')">🎤</span>
+      <span title="聊天记录" onclick="openSearch()">🕘</span>
       <span class="right">
         <span title="消息免打扰" id="mutebtn" onclick="toggleMute()">🔕</span>
       </span>
@@ -241,10 +255,10 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
   <div class="msearch"><input placeholder="搜索群成员" oninput="renderMembers(this.value)"></div>
   <div id="memlist"></div>
   <div id="memfoot">
-    <span title="群文件" onclick="toast('UI 先行：群文件未接入（P1）')">📁</span>
+    <span title="群文件" onclick="groupFiles()">📁</span>
     <span title="群相册" onclick="toast('UI 先行：群相册未接入（P2）')">🖼️</span>
     <span title="群公告" onclick="openAdmin()">📢</span>
-    <span title="聊天记录" onclick="toast('UI 先行：聊天记录未接入（P1）')">🕘</span>
+    <span title="聊天记录" onclick="openSearch()">🕘</span>
   </div>
 </div>
 <div id="card"></div>
@@ -417,10 +431,40 @@ function rxHtml(m){
   if(!keys.length) return '';
   return `<div class="rx">${keys.map(k=>`<span class="rxchip ${rx[k].includes(ME)?'mine':''}" onclick="event.stopPropagation();reactTo('${m.message_id}','${k}')">${k}×${rx[k].length}</span>`).join('')}</div>`;
 }
+function attHtml(a){
+  const url=`${API}/files/${a.file_id}`;
+  if((a.mime||'').startsWith('image/')) return `<div class="att-img"><img src="${url}" alt="${esc(a.name)}" onclick="window.open('${url}')"></div>`;
+  return `<div class="att-file"><span style="font-size:22px">📄</span><div><b>${esc(a.name)}</b><small>${fmtSize(a.size)}</small></div><a href="${url}" download="${esc(a.name)}">⬇</a></div>`;
+}
+function fmtSize(n){ return n>1048576?(n/1048576).toFixed(1)+' MB':n>1024?(n/1024).toFixed(1)+' KB':(n||0)+' B'; }
 function bubbleHtml(m){
   if(m.recalled) return `<div class="bubble recall-note">⚠️ 「${esc(oneLine(m.text))}」由 ${esc(m.recalled_by||'')} 撤回 · ${SE_CN[m.side_effect]||m.side_effect||''}</div>`;
   const q = m.reply_to && MSGS[m.reply_to] ? `<div class="quote" onclick="jumpMsg('${m.reply_to}')">回复 ${esc(MSGS[m.reply_to].sender)}: ${esc(oneLine(MSGS[m.reply_to].text))}</div>` : '';
-  return `<div class="bubble" oncontextmenu="msgMenu(event,'${m.message_id}')">${q}${hl(m.text)}</div>${rxHtml(m)}`;
+  const atts = (m.attachments||[]).map(attHtml).join('');
+  const body = atts + (m.text ? hl(m.text) : '');
+  return `<div class="bubble" style="${atts&&!m.text?'padding:4px':''}" oncontextmenu="msgMenu(event,'${m.message_id}')">${q}${body}</div>${rxHtml(m)}`;
+}
+function pickFile(accept){
+  if(!CUR){ toast('先选择一个会话'); return; }
+  const inp=document.createElement('input'); inp.type='file'; inp.accept=accept; inp.style.display='none'; document.body.appendChild(inp);
+  inp.onchange=async()=>{
+    const f=inp.files[0]; inp.remove(); if(!f) return;
+    if(f.size>10*1024*1024){ toast('文件超过 10MB'); return; }
+    const b64=await new Promise(r=>{ const rd=new FileReader(); rd.onload=()=>r(rd.result.split(',')[1]); rd.readAsDataURL(f); });
+    toast('上传中…');
+    const meta=await jp('/files',{name:f.name,data_b64:b64,content_type:f.type});
+    if(meta.error){ toast('上传失败: '+meta.error); return; }
+    await jp(`/groups/${gid}/messages`,{sender:ME,text:'',idempotency_key:'att-'+Date.now(),
+      attachments:[{file_id:meta.file_id,name:meta.name,size:meta.size,mime:meta.mime}]});
+  };
+  inp.click();
+}
+async function groupFiles(){
+  if(!gid) return;
+  const fs=await j(`/groups/${gid}/files`);
+  const body = fs.length ? fs.map(a=>`<div class="att-file" style="margin:6px 0"><span style="font-size:22px">${(a.mime||'').startsWith('image/')?'🖼️':'📄'}</span><div><b>${esc(a.name)}</b><small>${fmtSize(a.size)}</small></div><a href="${API}/files/${a.file_id}" download="${esc(a.name)}">⬇</a></div>`).join('')
+    : '<div style="color:#9aa1ab;text-align:center;padding:30px 0">暂无群文件</div>';
+  openModal(`<h3>📁 群文件<span onclick="closeModals()">✕</span></h3><div class="mbody">${body}</div>`);
 }
 function addMsg(e){
   const p=e.payload; if(!p.message_id) return;
@@ -639,21 +683,35 @@ function toggleEmoji(ev){
 }
 function insEmoji(x){ const t=$('text'); const pos=t.selectionStart||t.value.length; t.value=t.value.slice(0,pos)+x+t.value.slice(pos); t.focus(); }
 
-// ---- 联系人 ----
-function renderContacts(q){
-  const friends=LS('ht_friends',[]);
-  const fHtml = friends.filter(f=>!q||matchMember(f,q)).map(f=>
-    `<div class="frow" onclick="openFriend('${esc(f.name)}')" oncontextmenu="friendMenu(event,'${esc(f.name)}')">
-      <div class="av ${f.kind==='agent'?'agent':''}">${esc(f.name[0]||'?')}<span class="dot"></span></div>
-      <div>${esc(f.name)}${f.kind==='agent'?'<span class="tag">AI</span>':''}</div><span class="st">在线</span></div>`).join('')
-    || '<div style="padding:10px 26px;color:#9aa1ab;font-size:12px">暂无好友，点上方 ＋ 添加</div>';
-  const gHtml = GROUPS.filter(g=>!isPrivate(g)&&(!q||matchMember(g,q))).map(g=>
-    `<div class="frow" onclick="openGroup('${g.group_id}')">
-      <div class="av">${esc(g.name[0]||'群')}</div><div>${esc(g.name)}</div><span class="st">${g.members_count||''}</span></div>`).join('');
-  $('pane-contacts').innerHTML =
-    `<div class="sec">▾ 我的好友 (${friends.length})</div>${fHtml}
-     <div class="sec" style="margin-top:6px">▾ 群组列表 (${GROUPS.filter(g=>!isPrivate(g)).length})</div>${gHtml}`;
+// ---- 联系人（服务端好友 + QQ 折叠树）----
+let FRIENDS=[];
+async function loadFriends(){
+  FRIENDS=await j('/friends');
+  const legacy=LS('ht_friends',[]);
+  if(legacy.length && !FRIENDS.length){
+    for(const f of legacy){ await jp('/friends',{name:f.name,kind:f.kind||'human'}); }
+    localStorage.removeItem('ht_friends');
+    FRIENDS=await j('/friends');
+  }
 }
+function renderContacts(q){
+  const fold=LS('ht_fold',{});
+  const fr=FRIENDS.filter(f=>!q||matchMember(f,q));
+  const agents=fr.filter(f=>f.kind==='agent'), humans=fr.filter(f=>f.kind!=='agent');
+  const groups=GROUPS.filter(g=>!isPrivate(g)&&(!q||matchMember(g,q)));
+  const sec=(k,t,n,rows)=>`<div class="sec" onclick="toggleFold('${k}')"><span class="fold">▾</span>${t} (${n})</div>${fold[k]?'':rows}`;
+  const frow=f=>`<div class="frow" onclick="selectFriend(event,this,'${esc(f.name)}')" ondblclick="openFriend('${esc(f.name)}')" oncontextmenu="friendMenu(event,'${esc(f.name)}')">
+      <div class="av ${f.kind==='agent'?'agent':''}">${esc(f.name[0]||'?')}<span class="dot"></span></div>
+      <div>${esc(f.name)}${f.kind==='agent'?'<span class="tag">AI</span>':''}<small>${f.kind==='agent'?'AI 助手':'好友'} · 单击名片 双击会话</small></div></div>`;
+  const grow=g=>`<div class="frow" onclick="selectFriend(event,this,'')" ondblclick="openGroup('${g.group_id}')">
+      <div class="av">${esc(g.name[0]||'群')}</div><div>${esc(g.name)}<small>群${g.members_count?` · ${g.members_count} 人`:''} · 双击进入</small></div></div>`;
+  $('pane-contacts').innerHTML =
+    `<div class="me-row" onclick="showCard(event,'${esc(ME)}')"><div class="av">沣</div><div><b>${esc(ME)}</b><small>我 · 在线</small></div></div>
+     ${sec('fr','👥 我的好友',fr.length,(humans.map(frow).join('')+agents.map(frow).join(''))||'<div style="padding:10px 26px;color:#9aa1ab;font-size:12px">暂无好友，点上方 ＋ 添加</div>')}
+     ${sec('gp','🏷 群组列表',groups.length,groups.map(grow).join('')||'<div style="padding:10px 26px;color:#9aa1ab;font-size:12px">暂无群</div>')}`;
+}
+function toggleFold(k){ const f=LS('ht_fold',{}); f[k]=!f[k]; SLS('ht_fold',f); renderContacts($('searchbox').value); }
+function selectFriend(ev,el,name){ document.querySelectorAll('.frow.sel').forEach(x=>x.classList.remove('sel')); el.classList.add('sel'); if(name) showCard(ev,name); }
 function addMenu(ev){
   ev.stopPropagation();
   showCtx(ev, ['添加好友（真人）','添加好友（Bot）','创建群'], i=>{
@@ -667,29 +725,29 @@ function addFriend(kind){
     <div class="mbody"><label>名字（与群成员/网关注册名一致）</label><input id="fname" placeholder="${kind==='agent'?'hetu-worker':'同事名字'}"></div>
     <div class="mfoot"><button onclick="closeModals()">取消</button><button class="pri" onclick="saveFriend('${kind}')">添加</button></div>`);
 }
-function saveFriend(kind){
+async function saveFriend(kind){
   const name=$('fname').value.trim(); if(!name) return toast('名字不能为空');
-  const friends=LS('ht_friends',[]);
-  if(friends.some(f=>f.name===name)) return toast('好友已存在');
-  friends.push({name,kind,gid:null}); SLS('ht_friends',friends);
-  closeModals(); renderContacts(); toast(`已添加好友 ${name}`);
+  const r=await jp('/friends',{name,kind});
+  if(r.error) return toast(r.error);
+  await loadFriends(); closeModals(); renderContacts(); toast(`已添加好友 ${name}`);
 }
 function friendMenu(ev,name){
   ev.preventDefault(); ev.stopPropagation();
-  showCtx(ev,['发起会话','删除好友'],i=>{
+  showCtx(ev,['发起会话','删除好友'],async i=>{
     if(i===0) openFriend(name);
-    if(i===1){ SLS('ht_friends',LS('ht_friends',[]).filter(f=>f.name!==name)); renderContacts(); }
+    if(i===1){ await fetch(`${API}/friends/${encodeURIComponent(name)}`,{method:'DELETE'}); await loadFriends(); renderContacts(); }
   });
 }
 async function openFriend(name){
-  const friends=LS('ht_friends',[]); const f=friends.find(x=>x.name===name); if(!f) return;
-  if(!f.gid){
-    const g=await jp('/groups',{name:`与${f.name}的私聊`,mode:'default_single'});
+  const f=FRIENDS.find(x=>x.name===name); if(!f) return;
+  let g=GROUPS.find(x=>x.name===`与${f.name}的私聊`);
+  if(!g){
+    g=await jp('/groups',{name:`与${f.name}的私聊`,mode:'default_single'});
     await jp(`/groups/${g.group_id}/members`,{kind:'human',name:ME});
     await jp(`/groups/${g.group_id}/members`,{kind:f.kind,name:f.name});
-    f.gid=g.group_id; SLS('ht_friends',friends);
+    await loadConvs();
   }
-  await openGroup(f.gid);
+  await openGroup(g.group_id);
 }
 async function newGroup(){
   const name=prompt('群名称'); if(!name) return;
@@ -867,7 +925,7 @@ async function forgetMem(name,mid){
 
 // ---- 启动 ----
 (async function boot(){
-  await loadConvs();
+  await Promise.all([loadConvs(), loadFriends()]);
   setInterval(()=>{ if(document.visibilityState==='visible') loadConvs(); }, 10000);
 })();
 </script>
