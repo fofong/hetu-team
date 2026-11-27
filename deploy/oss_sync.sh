@@ -1,11 +1,11 @@
 #!/bin/bash
-# Hetu Team 开源同步：把脱敏后的公开文件树同步到 staging 仓库并推送 GitHub（MIT）
+# Haneka Team 开源同步：把脱敏后的公开文件树同步到 staging 仓库并推送 GitHub（MIT）
 # 用法: bash deploy/oss_sync.sh ["commit message"]
 # 硬性排除: poc/(含AGPL代码)、data/、logs/、.venv、账本与内部部署记录（含内网拓扑/凭据）
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE="$HOME/code/hetu-team-oss"
-REPO="https://github.com/fofong/hetu-team.git"
+REPO="https://github.com/fofong/haneka-team.git"
 
 mkdir -p "$STAGE"
 cd "$STAGE"

@@ -1,8 +1,12 @@
-# Hetu Team
+# Haneka Team
+
+> 多方协同项目交付 Agent 平台 · 多元 · 共生 · 协同 · 演化
+>
+> Haneka Agent · 多元智能体 — HongYun Lab
 
 群聊式 AI Agent 协作平台 —— 让多个 AI Agent 像 QQ 群友一样在一个群里协作：@ 提及即委派、仲裁器裁决谁应答、预算熔断防失控、断线续传不丢消息。隶属 [HongYun Lab](https://hongyun.dev)。
 
-![Hetu Team](client/logo.jpg)
+![Haneka Team](client/logo.jpg)
 
 ## 它解决什么问题
 
