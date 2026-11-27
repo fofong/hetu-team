@@ -24,6 +24,7 @@ from .friends import FriendService
 from .files import FileStore
 from .numbers import NumberService
 from .credits import CreditService
+from .taskboard import TaskBoard, CATEGORIES
 from .tasks import TaskService
 
 
@@ -122,6 +123,40 @@ class DelegateIn(BaseModel):
     requester: str | None = None  # A2A 调度发起方；提供时启用好友授权/信用点闸门
 
 
+class TaskPublishIn(BaseModel):
+    publisher: str
+    title: str
+    desc: str = ""
+    category: str = "simple"
+    reward: int | None = None
+    deadline: int | None = None
+    evaluator: str | None = None
+
+
+class TaskClaimIn(BaseModel):
+    claimer: str
+
+
+class TaskDeliverIn(BaseModel):
+    claimer: str
+    artifact: str
+    note: str = ""
+
+
+class TaskSettleIn(BaseModel):
+    evaluator: str
+    amount: int | None = None
+
+
+class TaskRejectIn(BaseModel):
+    evaluator: str
+    reason: str = ""
+
+
+class TaskCancelIn(BaseModel):
+    publisher: str
+
+
 class FriendReqIn(BaseModel):
     frm: str = Field(alias="from")
     to: str
@@ -182,6 +217,7 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     files = FileStore(Path(db_path).parent / "files")
     numbers = NumberService(store)
     credits = CreditService(store)
+    taskboard = TaskBoard(store, credits)
 
     def _backfill_numbers():
         """存量群/成员补齐数字号（幂等，重启不重发）."""
@@ -531,6 +567,73 @@ def create_app(db_path: str, transport=None) -> FastAPI:
             return {"name": body.name, "balance": credits.grant(body.name, body.amount, body.reason)}
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+
+    @app.post("/a2a/tasks")
+    def task_publish(body: TaskPublishIn):
+        try:
+            return taskboard.publish(body.publisher, body.title, body.desc, body.category,
+                                     body.reward, body.deadline, body.evaluator)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=402)  # x402 语义：资金不足=Payment Required
+
+    @app.get("/a2a/tasks")
+    def task_list(status: str | None = None, publisher: str | None = None):
+        return taskboard.list_tasks(status, publisher)
+
+    @app.get("/a2a/tasks/{task_id}")
+    def task_get(task_id: str):
+        try:
+            return taskboard.get(task_id)
+        except KeyError:
+            return JSONResponse({"error": "no such task"}, status_code=404)
+
+    @app.get("/reputation/{name}")
+    def task_reputation(name: str):
+        return taskboard.reputation(name)
+
+    @app.post("/a2a/tasks/{task_id}/claim")
+    def task_claim(task_id: str, body: TaskClaimIn):
+        try:
+            return taskboard.claim(task_id, body.claimer)
+        except (KeyError, ValueError) as e:
+            code = 404 if isinstance(e, KeyError) else 409
+            return JSONResponse({"error": str(e)}, status_code=code)
+
+    @app.post("/a2a/tasks/{task_id}/deliver")
+    def task_deliver(task_id: str, body: TaskDeliverIn):
+        try:
+            return taskboard.deliver(task_id, body.claimer, body.artifact, body.note)
+        except (KeyError, ValueError) as e:
+            code = 404 if isinstance(e, KeyError) else 409
+            return JSONResponse({"error": str(e)}, status_code=code)
+
+    @app.post("/a2a/tasks/{task_id}/settle")
+    def task_settle(task_id: str, body: TaskSettleIn):
+        try:
+            return taskboard.settle(task_id, body.evaluator, body.amount)
+        except (KeyError, ValueError) as e:
+            code = 404 if isinstance(e, KeyError) else 409
+            return JSONResponse({"error": str(e)}, status_code=code)
+
+    @app.post("/a2a/tasks/{task_id}/reject")
+    def task_reject(task_id: str, body: TaskRejectIn):
+        try:
+            return taskboard.reject(task_id, body.evaluator, body.reason)
+        except (KeyError, ValueError) as e:
+            code = 404 if isinstance(e, KeyError) else 409
+            return JSONResponse({"error": str(e)}, status_code=code)
+
+    @app.post("/a2a/tasks/{task_id}/cancel")
+    def task_cancel(task_id: str, body: TaskCancelIn):
+        try:
+            return taskboard.cancel(task_id, body.publisher)
+        except (KeyError, ValueError) as e:
+            code = 404 if isinstance(e, KeyError) else 409
+            return JSONResponse({"error": str(e)}, status_code=code)
+
+    @app.get("/taskmeta/categories")
+    def task_categories():
+        return CATEGORIES
 
     @app.post("/files")
     def upload_file(body: FileIn):

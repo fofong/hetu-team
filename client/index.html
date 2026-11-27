@@ -775,16 +775,69 @@ async function newGroup(){
 
 // ---- 任务 ----
 const ST_CN={queued:'待认领',running:'执行中',completed:'待验收',accepted:'已验收'};
+const AT_CN={open:'招标中',claimed:'执行中',submitted:'待验收',settled:'已结算',refunded:'已退回',cancelled:'已撤单',expired:'已过期'};
+const CATS={simple:1,research:20,code:30,audit:50,verify:0};
 async function renderTasks(){
-  const ts = gid? await j(`/groups/${gid}/tasks`) : [];
+  const [ts,at,cr,rep]=await Promise.all([
+    gid? j(`/groups/${gid}/tasks`) : Promise.resolve([]),
+    j('/a2a/tasks'), j(`/credits/${ME}`), j(`/reputation/${ME}`)]);
   const rows = ts.map(t=>`<div class="trow">
     <div class="tt"><span>${esc(t.title)}</span><span class="st-badge st-${t.status}">${ST_CN[t.status]||t.status}</span></div>
     <div class="meta">负责: ${esc(t.assignee)}
       ${t.status==='completed'?`<button class="btn-s pri" onclick="acceptTask('${t.task_id}')">验收</button>`:''}</div></div>`).join('')
     || '<div style="padding:14px;color:#9aa1ab;font-size:12px">当前群暂无任务</div>';
+  const rate=rep.settled+rep.refunded? Math.round(rep.success_rate*100)+'%' : '—';
+  const arows=at.map(t=>{
+    const mine=t.publisher===ME, claimed=t.claimer===ME, evalr=t.evaluator===ME;
+    let btns='';
+    if(t.status==='open'&&!mine) btns=`<button class="btn-s pri" onclick="claimTask('${t.task_id}')">认领</button>`;
+    if(t.status==='claimed'&&claimed) btns+=`<button class="btn-s pri" onclick="deliverTask('${t.task_id}')">交付</button>`;
+    if(t.status==='submitted'&&evalr) btns+=`<button class="btn-s pri" onclick="settleTask('${t.task_id}',${t.reward})">验收</button><button class="btn-s" onclick="rejectTask('${t.task_id}')">打回</button>`;
+    if(t.status==='open'&&mine) btns+=`<button class="btn-s" onclick="cancelTask('${t.task_id}')">撤单</button>`;
+    return `<div class="trow"><div class="tt"><span>${esc(t.title)}</span><span class="st-badge st-${t.status}">${AT_CN[t.status]||t.status}</span></div>
+      <div class="meta">${esc(t.publisher)} → ${esc(t.claimer||'待认领')} · <b style="color:var(--qq)">${t.reward} 点</b>${mine?'（我发布）':''}
+      ${t.artifact?`<div style="color:#989eb4">交付: ${esc(t.artifact).slice(0,40)}</div>`:''}
+      ${btns?'<div style="margin-top:4px">'+btns+'</div>':''}</div></div>`;}).join('')
+    || '<div style="padding:14px;color:#9aa1ab;font-size:12px">市场暂无任务</div>';
   $('pane-tasks').innerHTML = `<div class="sec">📋 任务 · ${esc((GROUPS.find(g=>g.group_id===gid)||{}).name||'')}</div>
-    <div style="padding:8px 14px"><button class="btn-s pri" onclick="newTask()">＋ 新建任务</button></div>${rows}`;
+    <div style="padding:8px 14px"><button class="btn-s pri" onclick="newTask()">＋ 新建任务</button></div>${rows}
+    <div class="sec">🌐 A2A 任务市场 <span style="float:right;font-weight:400;font-size:12px">余额 ${cr.balance} 点 · 信誉 ${rate}</span></div>
+    <div style="padding:8px 14px"><button class="btn-s pri" onclick="publishTask()">＋ 发布任务</button></div>${arows}`;
 }
+function publishTask(){
+  openModal(`<h3>发布 A2A 任务<span onclick="closeModals()">✕</span></h3>
+    <div class="mbody"><label>任务标题</label><input id="atitle">
+    <label>类别（定价参考 P(T)）</label><select id="acat" onchange="$('areward').value=CATS[this.value]||''">
+      <option value="simple">简单查询 · 1 点</option><option value="research">深度研究 · 20 点</option>
+      <option value="code">代码修改 · 30 点</option><option value="audit">安全审计 · 50 点</option><option value="verify">独立验证 · 另行报价</option></select>
+    <label>报酬（Credits）</label><input id="areward" type="number" value="1">
+    <label>说明（可选）</label><input id="adesc">
+    <div style="color:#989eb4;font-size:12px;margin-top:6px">发布即冻结报酬托管；验收后结算，可部分结算差额退回</div></div>
+    <div class="mfoot"><button onclick="closeModals()">取消</button><button class="pri" onclick="createA2ATask()">发布（冻结托管）</button></div>`);
+}
+async function createA2ATask(){
+  const title=$('atitle').value.trim(); if(!title) return toast('标题不能为空');
+  const r=await fetch('/a2a/tasks',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({publisher:ME,title,category:$('acat').value,reward:+$('areward').value||null,desc:$('adesc').value})});
+  const d=await r.json(); if(!r.ok) return toast(d.error||'发布失败');
+  closeModals(); renderTasks(); toast(`已发布 ${d.task_id}（${d.reward} 点已托管）`);
+}
+async function claimTask(id){ const r=await fetch(`/a2a/tasks/${id}/claim`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({claimer:ME})}); const d=await r.json(); if(!r.ok) return toast(d.error||'认领失败'); renderTasks(); toast('已认领，请交付'); }
+function deliverTask(id){ openModal(`<h3>交付任务<span onclick="closeModals()">✕</span></h3>
+  <div class="mbody"><label>交付物说明</label><input id="dart"></div>
+  <div class="mfoot"><button onclick="closeModals()">取消</button><button class="pri" onclick="doDeliver('${id}')">提交交付</button></div>`); }
+async function doDeliver(id){ const a=$('dart').value.trim(); if(!a) return toast('交付物不能为空');
+  const r=await fetch(`/a2a/tasks/${id}/deliver`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({claimer:ME,artifact:a})});
+  if(!r.ok) return toast((await r.json()).error||'失败'); closeModals(); renderTasks(); toast('已交付，待验收'); }
+function settleTask(id,max){ openModal(`<h3>验收结算<span onclick="closeModals()">✕</span></h3>
+  <div class="mbody"><label>结算点数（≤${max}，差额自动退回）</label><input id="samt" type="number" value="${max}"></div>
+  <div class="mfoot"><button onclick="closeModals()">取消</button><button class="pri" onclick="doSettle('${id}')">确认结算</button></div>`); }
+async function doSettle(id){ const r=await fetch(`/a2a/tasks/${id}/settle`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({evaluator:ME,amount:+$('samt').value||null})});
+  const d=await r.json(); if(!r.ok) return toast(d.error||'失败'); closeModals(); renderTasks(); toast(`已结算 ${d.amount} 点${d.refunded?`，退回 ${d.refunded}`:''}`); }
+async function rejectTask(id){ const r=await fetch(`/a2a/tasks/${id}/reject`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({evaluator:ME,reason:'不合格'})});
+  if(!r.ok) return toast((await r.json()).error||'失败'); renderTasks(); toast('已打回，托管全额退回'); }
+async function cancelTask(id){ const r=await fetch(`/a2a/tasks/${id}/cancel`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({publisher:ME})});
+  if(!r.ok) return toast((await r.json()).error||'失败'); renderTasks(); toast('已撤单退款'); }
 function newTask(){
   const agents=MEMBERS.filter(m=>m.kind==='agent');
   openModal(`<h3>新建任务<span onclick="closeModals()">✕</span></h3>
