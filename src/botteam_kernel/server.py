@@ -203,7 +203,7 @@ class MemoryIn(BaseModel):
     kind: str = "fact"
 
 
-def create_app(db_path: str, transport=None) -> FastAPI:
+def create_app(db_path: str, transport=None, *, specialist_runner=None) -> FastAPI:
     store = EventStore(db_path)
     groups = GroupService(store)
     tasks = TaskService(store)
@@ -257,6 +257,10 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.state.store, app.state.groups, app.state.tasks = store, groups, tasks
     app.state.authz = authz
+    if specialist_runner is not None:
+        from .specialists import install_routes
+
+        install_routes(app, groups, numbers, store, specialist_runner)
 
     _client_html = Path(__file__).parent / "webclient" / "index.html"
 
