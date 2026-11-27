@@ -6,18 +6,19 @@
 <title>Hetu Team</title>
 <link rel="icon" type="image/jpeg" href="logo.jpg">
 <style>
-:root{--qqbar:#1c2739;--list:#f7f8fa;--list-sel:#dfe4ec;--chat:#f5f6f7;--border:#e2e4e8;--me:#b9dcff;--txt:#171b21;--sub:#9aa1ab;--qq:#12b7f5;--red:#fa5151}
+:root{--qqbar:#f2f3f5;--list:#ffffff;--list-sel:#e5e9f0;--chat:#ebedf5;--border:#e2e4e8;--me:#00cafc;--txt:#03081a;--sub:#989eb4;--qq:#00cafc;--red:#ff596a}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);display:flex;overflow:hidden;background:var(--chat)}
 /* ① 最左深色图标栏 */
-#iconbar{width:56px;background:var(--qqbar);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:10px;flex:none}
-#iconbar .me-avatar{width:36px;height:36px;border-radius:8px;overflow:hidden;flex:none;margin-bottom:8px}
+#iconbar{width:60px;background:var(--qqbar);border-right:1px solid #e8eaee;display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:6px;flex:none}
+#iconbar .me-avatar{width:36px;height:36px;border-radius:8px;overflow:hidden;flex:none;margin-bottom:10px}
 #iconbar .me-avatar img{width:100%;height:100%;object-fit:cover}
-#iconbar .brand{color:#6d7891;font-size:10px;writing-mode:vertical-rl;letter-spacing:2px;margin-top:auto;padding-bottom:6px}
-#iconbar .tab{width:36px;height:36px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:19px;color:#8a93a5;cursor:pointer;position:relative}
-#iconbar .tab.on{background:#33405a;color:#fff}
-#iconbar .tab .dot{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--red);display:none}
+#iconbar .brand{color:#b0b3bf;font-size:10px;writing-mode:vertical-rl;letter-spacing:2px;margin-top:auto;padding-bottom:6px}
+#iconbar .tab{width:46px;height:44px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:17px;color:#5a6472;cursor:pointer;position:relative}
+#iconbar .tab u{font-size:10px;text-decoration:none;font-style:normal;line-height:1}
+#iconbar .tab.on{background:#e0f6ff;color:var(--qq)}
+#iconbar .tab .dot{position:absolute;top:2px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--red);display:none}
 #iconbar .bot-gap{margin-top:auto}
 /* ② 列表栏（会话/联系人/任务） */
 #list{width:264px;background:var(--list);border-right:1px solid var(--border);display:flex;flex-direction:column;flex:none}
@@ -55,10 +56,12 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
 .st-badge{border-radius:3px;padding:0 6px;font-size:11px;color:#fff}
 .st-queued{background:#8f9bb3}.st-running{background:#12b7f5}.st-completed{background:#ff9a3d}.st-accepted{background:#22c55e}
 /* ③ 聊天区 */
-#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#main{flex:1;display:flex;flex-direction:column;min-width:0;container: chatmain / inline-size}
 #head{height:58px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:10px;flex:none;position:relative}
-#head .title b{font-size:15px}
-#head .title small{display:block;color:var(--sub);font-size:11px}
+#head .title{flex:1;min-width:0;text-align:left;overflow:hidden}
+@container chatmain (min-width:500px){#head .title{position:absolute;left:50%;transform:translateX(-50%);text-align:center;max-width:calc(100% - 260px);flex:none}}
+#head .title b{font-size:15px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#head .title small{display:block;color:var(--sub);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #head .rightbox{margin-left:auto;display:flex;align-items:center;gap:14px;color:#6b7280}
 #head .tools span{cursor:pointer;font-size:16px}
 #status{font-size:12px;color:var(--sub)}
@@ -90,16 +93,14 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
 .msg .who{font-size:12px;color:var(--sub);margin-bottom:3px}
 .msg .who .more{display:none;margin-left:8px;cursor:pointer;color:#c0c6cf}
 .msg:hover .who .more{display:inline}
-.bubble{background:#fff;border-radius:8px;padding:9px 12px;box-shadow:0 1px 2px rgba(0,0,0,.06);word-break:break-word;position:relative;white-space:normal}
-.msg:not(.me):not(.sys) .bubble::before{content:'';position:absolute;left:-4px;top:13px;width:10px;height:10px;background:#fff;transform:rotate(45deg);border-radius:2px}
-.msg.me .bubble::before{content:'';position:absolute;right:-4px;top:13px;width:10px;height:10px;background:var(--me);transform:rotate(45deg);border-radius:2px}
-.timecut{align-self:center;color:var(--sub);font-size:11px;padding:2px 6px;margin-bottom:10px}
+.bubble{background:#fff;border-radius:6px;padding:9px 12px;box-shadow:0 1px 2px rgba(0,0,0,.06);word-break:break-word;position:relative;white-space:normal}
+.timecut{align-self:center;color:#b0b3bf;font-size:11px;padding:2px 6px;margin-bottom:10px}
 .msg.me{align-self:flex-end;flex-direction:row-reverse}
 .msg.me .who{text-align:right}
 .msg.me .avatar{background:#52b788}
-.msg.me .bubble{background:var(--me)}
+.msg.me .bubble{background:var(--me);color:#fff}
 .msg.sys{align-self:center;max-width:90%}
-.msg.sys .bubble{background:#eceff3;color:var(--sub);font-size:12px;box-shadow:none}
+.msg.sys .bubble{background:transparent;color:#989eb4;font-size:12px;box-shadow:none;padding:2px 6px}
 .quote{background:#f0f2f5;border-left:3px solid #c6ccd6;border-radius:4px;padding:4px 8px;margin-bottom:6px;font-size:12px;color:#57606c;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .quote:hover{background:#e8ebef}
 .at{color:#146fd4}
@@ -147,7 +148,7 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
 #memfoot span{cursor:pointer}
 /* 个人名片 */
 #card{position:fixed;z-index:50;width:300px;background:#fff;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.18);display:none;overflow:hidden}
-#card .cover{height:64px;background:linear-gradient(120deg,#b7e3fb,#d8f1ff)}
+#card .cover{height:64px;background:linear-gradient(120deg,#00cafc,#4d94ff)}
 #card .body{display:flex;gap:12px;padding:0 16px 12px;margin-top:-26px}
 #card .cav{width:56px;height:56px;border-radius:8px;border:2px solid #fff;background:#ffb266;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;flex:none;box-shadow:0 1px 4px rgba(0,0,0,.15)}
 #card .cav.human{background:#7aa5ff}
@@ -207,10 +208,10 @@ body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--txt);displ
 <body>
 <div id="iconbar">
   <div class="me-avatar" title="Hetu Team · HongYun Lab"><img src="logo.jpg" alt="Hetu Team"></div>
-  <div class="tab on" id="tab-msg" title="消息" onclick="switchTab('msg')">💬<span class="dot" id="msgdot"></span></div>
-  <div class="tab" id="tab-contacts" title="联系人" onclick="switchTab('contacts')">👥</div>
-  <div class="tab" id="tab-tasks" title="任务" onclick="switchTab('tasks')">📋</div>
-  <div class="tab bot-gap" title="关于" onclick="toast('Hetu Team · HongYun Lab · MIT')">⚙️</div>
+  <div class="tab on" id="tab-msg" title="消息" onclick="switchTab('msg')">💬<u>消息</u><span class="dot" id="msgdot"></span></div>
+  <div class="tab" id="tab-contacts" title="联系人" onclick="switchTab('contacts')">👥<u>联系人</u></div>
+  <div class="tab" id="tab-tasks" title="任务" onclick="switchTab('tasks')">📋<u>任务</u></div>
+  <div class="tab bot-gap" title="关于" onclick="toast('Hetu Team · HongYun Lab · MIT')">⚙️<u>关于</u></div>
   <div class="brand">HongYun Lab</div>
 </div>
 <div id="list">
@@ -292,7 +293,9 @@ let COLL=null; try{ COLL=new Intl.Collator('zh-Hans-CN-u-co-pinyin'); }catch(e){
 const PB=[['z','匝'],['y','压'],['x','昔'],['w','挖'],['t','塌'],['s','撒'],['r','然'],['q','期'],['p','啪'],['o','哦'],['n','拿'],['m','妈'],['l','垃'],['k','喀'],['j','击'],['h','哈'],['g','噶'],['f','发'],['e','蛾'],['d','哒'],['c','擦'],['b','芭'],['a','阿']];
 function initial(ch){ if(/[a-z0-9]/i.test(ch)) return ch.toLowerCase(); if(!COLL||!/[\u4e00-\u9fa5]/.test(ch)) return ''; for(const [l,b] of PB){ if(COLL.compare(ch,b)>=0) return l; } return ''; }
 function initials(n){ return Array.from(String(n)).map(initial).join(''); }
-function matchMember(m,q){ if(!q) return true; q=q.toLowerCase(); return m.name.toLowerCase().includes(q) || initials(m.name).startsWith(q); }
+function matchMember(m,q){ if(!q) return true; q=q.toLowerCase(); return m.name.toLowerCase().includes(q) || initials(m.name).startsWith(q) || (IDS[m.name]||'').includes(q) || (m.group_number||'').includes(q); }
+let IDS={};
+async function loadIds(){ try{ IDS={}; (await j('/ids')).forEach(i=>IDS[i.ref]=i.number); }catch(e){} }
 
 // ---- Tab 切换 ----
 function switchTab(t){
@@ -366,7 +369,7 @@ async function openGroup(id){
   $('adminbtn').style.display = priv?'none':'';
   const who = priv? g.name.replace(/^与/,'').replace(/的私聊$/,'') : g.name;
   $('gname').textContent = who;
-  $('gsub').textContent = priv? '在线' : `群号: ${g.group_id.slice(0,8).toUpperCase()} · ${modeCN(g.mode)}`;
+  $('gsub').textContent = priv? '在线' : `群号: ${g.group_number || '—'} · ${modeCN(g.mode)}`;
   $('pinbar').style.display='none'; PIN_MID=null; clearThinking();
   renderAnnounce(); loadPins();
   const ms = await j(`/groups/${id}/messages`);
@@ -410,7 +413,7 @@ function render(e){
   else if(e.kind==='group.announcement_set'){ addSys(`📢 群公告已更新：${p.text}`); const g=GROUPS.find(x=>x.group_id===p.group_id); if(g) g.announcement={text:p.text,set_by:p.set_by}; renderAnnounce(); }
   else if(e.kind==='member.joined') { addSys(`${p.name} 加入了群聊`); refreshMembers(); }
   else if(e.kind==='member.left')   { addSys('成员已被移出群聊'); refreshMembers(); }
-  else if(e.kind==='group.settings_set'){ addSys('群信息已更新'); const g=GROUPS.find(x=>x.group_id===p.group_id); if(g){ if(p.name)g.name=p.name; if(p.mode)g.mode=p.mode; } if(p.name) $('gname').textContent=g?g.name:''; if(p.mode) $('gsub').textContent=`群号: ${gid.slice(0,8).toUpperCase()} · ${modeCN(p.mode)}`; }
+  else if(e.kind==='group.settings_set'){ addSys('群信息已更新'); const g=GROUPS.find(x=>x.group_id===p.group_id); if(g){ if(p.name)g.name=p.name; if(p.mode)g.mode=p.mode; } if(p.name) $('gname').textContent=g?g.name:''; if(p.mode) $('gsub').textContent=`群号: ${(g&&g.group_number)||'—'} · ${modeCN(p.mode)}`; }
   else if(e.kind && e.kind.startsWith('approval.')) addSys(`审批${{requested:'已发起',approved:'已通过',refused:'已拒绝',executed:'已执行',expired:'已过期'}[e.kind.split('.')[1]]||e.kind}：${p.title||p.approval_id||''}`);
   else if(e.kind==='message.recalled'){ if(MSGS[p.message_id]) Object.assign(MSGS[p.message_id],{recalled:true,recalled_by:p.by,side_effect:p.side_effect}); if(p.group_id===gid) applyRecallDom(p.message_id); }
   else if(e.kind==='message.reacted'){ if(p.group_id===gid) setTimeout(()=>applyReactDom(p.message_id),50); }
@@ -702,9 +705,9 @@ function renderContacts(q){
   const sec=(k,t,n,rows)=>`<div class="sec" onclick="toggleFold('${k}')"><span class="fold">▾</span>${t} (${n})</div>${fold[k]?'':rows}`;
   const frow=f=>`<div class="frow" onclick="selectFriend(event,this,'${esc(f.name)}')" ondblclick="openFriend('${esc(f.name)}')" oncontextmenu="friendMenu(event,'${esc(f.name)}')">
       <div class="av ${f.kind==='agent'?'agent':''}">${esc(f.name[0]||'?')}<span class="dot"></span></div>
-      <div>${esc(f.name)}${f.kind==='agent'?'<span class="tag">AI</span>':''}<small>${f.kind==='agent'?'AI 助手':'好友'} · 单击名片 双击会话</small></div></div>`;
+      <div>${esc(f.name)}${f.kind==='agent'?'<span class="tag">AI</span>':''}<small>${f.qq_number?`QQ: ${f.qq_number}`:(f.kind==='agent'?'AI 助手':'好友')} · 单击名片 双击会话</small></div></div>`;
   const grow=g=>`<div class="frow" onclick="selectFriend(event,this,'')" ondblclick="openGroup('${g.group_id}')">
-      <div class="av">${esc(g.name[0]||'群')}</div><div>${esc(g.name)}<small>群${g.members_count?` · ${g.members_count} 人`:''} · 双击进入</small></div></div>`;
+      <div class="av">${esc(g.name[0]||'群')}</div><div>${esc(g.name)}<small>${g.group_number?`群号 ${g.group_number}`:'群'}${g.members_count?` · ${g.members_count} 人`:''} · 双击进入</small></div></div>`;
   $('pane-contacts').innerHTML =
     `<div class="me-row" onclick="showCard(event,'${esc(ME)}')"><div class="av">沣</div><div><b>${esc(ME)}</b><small>我 · 在线</small></div></div>
      ${sec('fr','👥 我的好友',fr.length,(humans.map(frow).join('')+agents.map(frow).join(''))||'<div style="padding:10px 26px;color:#9aa1ab;font-size:12px">暂无好友，点上方 ＋ 添加</div>')}
@@ -794,6 +797,7 @@ async function quoteAsTask(){
 function openAdmin(){
   const g=GROUPS.find(x=>x.group_id===gid); if(!g) return;
   openModal(`<h3>群设置<span onclick="closeModals()">✕</span></h3><div class="mbody">
+    <div style="color:#989eb4;font-size:12px;margin:2px 0 6px">群号：${g.group_number||'—'}</div>
     <label>群名称</label><input id="admname" value="${esc(g.name)}">
     <label>群模式（五种群组运行模式）</label>
     <select id="admmode">${MODES.map(([v,n])=>`<option value="${v}" ${g.mode===v?'selected':''}>${n}</option>`).join('')}</select>
@@ -881,7 +885,7 @@ async function showCard(ev, name){
   card.innerHTML=`<div class="cover"></div>
     <div class="body"><div class="cav ${isAgent?'':'human'}">${esc(name[0]||'?')}</div>
       <div class="cinfo"><div class="cname">${esc(name)}${isAgent?'<span class="tag">AI</span>':''}</div>
-      <div class="cno">编号: ${m?m.member_id.slice(0,8):'—'}</div></div></div>
+      <div class="cno">QQ: ${IDS[name] || '—'}</div></div></div>
     <div class="csign">${esc(sign)}${duty?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(duty)}</div>`:''}${caps?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(caps)}</div>`:''}${curTask?`<div style="color:${curTask==='当前任务：无'?'#9aa1ab':'#146fd4'};font-size:12px;margin-top:4px">${esc(curTask)}</div>`:''}${rmLine?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(rmLine)}</div>`:''}</div>
     <div class="acts"><a onclick="quickMsg('${esc(name)}')">发消息</a>${isAgent?`<a onclick="editPersona('${esc(name)}')">编辑签名</a><a onclick="showMemory('${esc(name)}')">记忆</a>`:''}</div>`;
   card.style.display='block';
@@ -925,7 +929,7 @@ async function forgetMem(name,mid){
 
 // ---- 启动 ----
 (async function boot(){
-  await Promise.all([loadConvs(), loadFriends()]);
+  await Promise.all([loadConvs(), loadFriends(), loadIds()]);
   setInterval(()=>{ if(document.visibilityState==='visible') loadConvs(); }, 10000);
 })();
 </script>

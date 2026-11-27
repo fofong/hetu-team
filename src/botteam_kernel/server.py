@@ -22,6 +22,7 @@ from .approvals import ApprovalService
 from .memory import MemoryService
 from .friends import FriendService
 from .files import FileStore
+from .numbers import NumberService
 from .tasks import TaskService
 
 
@@ -166,6 +167,17 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     memories = MemoryService(store)
     friends = FriendService(store)
     files = FileStore(Path(db_path).parent / "files")
+    numbers = NumberService(store)
+
+    def _backfill_numbers():
+        """存量群/成员补齐数字号（幂等，重启不重发）."""
+        for g in groups._groups.values():
+            numbers.assign("group", g["group_id"])
+        for gid in list(groups._members):
+            for m in groups.members(gid):
+                numbers.assign("member", m["name"])
+
+    _backfill_numbers()
 
     def compose_prompt(gid: str, agent_name: str, task_text: str, reply_to: str | None = None) -> str:
         """委派 prompt = 群公告 + 人格 + 职责 + 召回记忆 + 引用全文 + 任务；全空原样（反例保护）."""
@@ -212,7 +224,11 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
     @app.post("/groups")
     def create_group(body: GroupIn):
-        return groups.create_group(name=body.name, mode=body.mode)
+        g = groups.create_group(name=body.name, mode=body.mode)
+        gid = g.get("group_id") or g.get("id")
+        if gid:
+            g["group_number"] = numbers.assign("group", gid)
+        return g
 
     @app.get("/groups")
     def list_groups():
@@ -220,13 +236,20 @@ def create_app(db_path: str, transport=None) -> FastAPI:
         for g in groups._groups.values():
             d = dict(g)
             d["members_count"] = len(groups.members(g["group_id"]))
+            d["group_number"] = numbers.assign("group", g["group_id"])
             out.append(d)
         return out
 
+    @app.get("/ids")
+    def list_ids():
+        return numbers.list_all()
+
     @app.post("/groups/{gid}/members")
     def add_member(gid: str, body: MemberIn):
-        return groups.add_member(gid, kind=body.kind, name=body.name, capabilities=body.capabilities,
-                                 response_mode=body.response_mode, keywords=body.keywords)
+        m = groups.add_member(gid, kind=body.kind, name=body.name, capabilities=body.capabilities,
+                              response_mode=body.response_mode, keywords=body.keywords)
+        numbers.assign("member", body.name)
+        return m
 
     @app.post("/groups/{gid}/members/{mid}/response_mode")
     def set_response_mode(gid: str, mid: str, body: ResponseModeIn):
@@ -434,7 +457,12 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     # ---- 好友 / 文件 endpoints ----
     @app.get("/friends")
     def list_friends():
-        return friends.list()
+        out = []
+        for f in friends.list():
+            d = dict(f)
+            d["qq_number"] = numbers.assign("member", f["name"])
+            out.append(d)
+        return out
 
     @app.post("/friends")
     def add_friend(body: FriendIn):
