@@ -696,6 +696,7 @@ async function loadFriends(){
     localStorage.removeItem('ht_friends');
     FRIENDS=await j('/friends');
   }
+  if(typeof TAB!=='undefined' && TAB==='contacts' && typeof renderContacts==='function') renderContacts($('searchbox').value);
 }
 function renderContacts(q){
   const fold=LS('ht_fold',{});
@@ -710,9 +711,14 @@ function renderContacts(q){
       <div class="av">${esc(g.name[0]||'群')}</div><div>${esc(g.name)}<small>${g.group_number?`群号 ${g.group_number}`:'群'}${g.members_count?` · ${g.members_count} 人`:''} · 双击进入</small></div></div>`;
   $('pane-contacts').innerHTML =
     `<div class="me-row" onclick="showCard(event,'${esc(ME)}')"><div class="av">沣</div><div><b>${esc(ME)}</b><small>我 · 在线</small></div></div>
+     ${REQS.length?`<div class="sec">🔔 好友请求 (${REQS.length})</div>`+REQS.map(r=>`<div class="frow"><div class="av">${esc(r.from[0]||'?')}</div><div>${esc(r.from)} 请求加你为好友<small><a style="color:#12b7f5" onclick="approveReq(event,'${esc(r.from)}','${esc(r.to)}')">同意</a> · <a style="color:#989eb4" onclick="declineReq(event,'${esc(r.from)}','${esc(r.to)}')">忽略</a></small></div></div>`).join(''):''}
      ${sec('fr','👥 我的好友',fr.length,(humans.map(frow).join('')+agents.map(frow).join(''))||'<div style="padding:10px 26px;color:#9aa1ab;font-size:12px">暂无好友，点上方 ＋ 添加</div>')}
      ${sec('gp','🏷 群组列表',groups.length,groups.map(grow).join('')||'<div style="padding:10px 26px;color:#9aa1ab;font-size:12px">暂无群</div>')}`;
 }
+let REQS=[];
+async function loadFriendReqs(){ try{ REQS=await j('/friends/requests'); }catch(e){ REQS=[]; } if(TAB==='contacts') renderContacts($('searchbox').value); }
+async function approveReq(ev,frm,to){ ev.stopPropagation(); await jp('/friends/approve',{from:frm,to:to}); toast(`已添加 ${frm} 为好友`); await Promise.all([loadFriendReqs(), loadFriends(), loadIds()]); }
+async function declineReq(ev,frm,to){ ev.stopPropagation(); await jp('/friends/decline',{from:frm,to:to}); await loadFriendReqs(); }
 function toggleFold(k){ const f=LS('ht_fold',{}); f[k]=!f[k]; SLS('ht_fold',f); renderContacts($('searchbox').value); }
 function selectFriend(ev,el,name){ document.querySelectorAll('.frow.sel').forEach(x=>x.classList.remove('sel')); el.classList.add('sel'); if(name) showCard(ev,name); }
 function addMenu(ev){
@@ -882,10 +888,11 @@ async function showCard(ev, name){
     if(m.response_mode) rmLine=`响应策略：${RM_CN[m.response_mode]||m.response_mode}${m.response_mode==='keyword'&&m.keywords&&m.keywords.length?`（${m.keywords.join('、')}）`:''}`;
   }
   const card=$('card');
+  let credit=''; try{ credit=(await j(`/credits/${encodeURIComponent(name)}`)).balance; }catch(e){}
   card.innerHTML=`<div class="cover"></div>
     <div class="body"><div class="cav ${isAgent?'':'human'}">${esc(name[0]||'?')}</div>
       <div class="cinfo"><div class="cname">${esc(name)}${isAgent?'<span class="tag">AI</span>':''}</div>
-      <div class="cno">QQ: ${IDS[name] || '—'}</div></div></div>
+      <div class="cno">QQ: ${IDS[name] || '—'}${credit!==''?` · 信用点: ${credit}`:''}</div></div></div>
     <div class="csign">${esc(sign)}${duty?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(duty)}</div>`:''}${caps?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(caps)}</div>`:''}${curTask?`<div style="color:${curTask==='当前任务：无'?'#9aa1ab':'#146fd4'};font-size:12px;margin-top:4px">${esc(curTask)}</div>`:''}${rmLine?`<div style="color:#9aa1ab;font-size:12px;margin-top:4px">${esc(rmLine)}</div>`:''}</div>
     <div class="acts"><a onclick="quickMsg('${esc(name)}')">发消息</a>${isAgent?`<a onclick="editPersona('${esc(name)}')">编辑签名</a><a onclick="showMemory('${esc(name)}')">记忆</a>`:''}</div>`;
   card.style.display='block';
@@ -929,7 +936,7 @@ async function forgetMem(name,mid){
 
 // ---- 启动 ----
 (async function boot(){
-  await Promise.all([loadConvs(), loadFriends(), loadIds()]);
+  await Promise.all([loadConvs(), loadFriends(), loadIds(), loadFriendReqs()]);
   setInterval(()=>{ if(document.visibilityState==='visible') loadConvs(); }, 10000);
 })();
 </script>

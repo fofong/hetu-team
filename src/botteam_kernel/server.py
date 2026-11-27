@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .arbitration import Arbiter
 from .authz import AuthorizationSystem
@@ -23,6 +23,7 @@ from .memory import MemoryService
 from .friends import FriendService
 from .files import FileStore
 from .numbers import NumberService
+from .credits import CreditService
 from .tasks import TaskService
 
 
@@ -118,6 +119,18 @@ class DelegateIn(BaseModel):
     agent_id: str
     prompt: str
     group_id: str | None = None
+    requester: str | None = None  # A2A 调度发起方；提供时启用好友授权/信用点闸门
+
+
+class FriendReqIn(BaseModel):
+    frm: str = Field(alias="from")
+    to: str
+
+
+class CreditGrantIn(BaseModel):
+    name: str
+    amount: int
+    reason: str = ""
 
 
 class CallbackIn(BaseModel):
@@ -168,6 +181,7 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     friends = FriendService(store)
     files = FileStore(Path(db_path).parent / "files")
     numbers = NumberService(store)
+    credits = CreditService(store)
 
     def _backfill_numbers():
         """存量群/成员补齐数字号（幂等，重启不重发）."""
@@ -412,6 +426,16 @@ def create_app(db_path: str, transport=None) -> FastAPI:
 
     @app.post("/gateway/delegate")
     def delegate(body: DelegateIn):
+        # A2A 调度双闸门（QQ 范式）：好友授权免点数；非好友扣目标 Agent 1 点；皆无拒绝。
+        # requester 缺省 = 内部可信路径（群内 @ 路由等），不受闸门影响（向后兼容）。
+        if body.requester and not friends.are_friends(body.requester, body.agent_id):
+            try:
+                credits.consume(body.agent_id, 1, f"A2A 调度 {body.botteam_task_id}")
+            except ValueError:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse({"error": "insufficient credits and not friends: dispatch refused"},
+                                    status_code=402)
         try:
             return gateway.delegate(body.botteam_task_id, body.agent_id, body.prompt, group_id=body.group_id)
         except ValueError as e:
@@ -474,6 +498,39 @@ def create_app(db_path: str, transport=None) -> FastAPI:
     @app.delete("/friends/{name}")
     def remove_friend(name: str):
         return {"removed": friends.remove(name)}
+
+    @app.post("/friends/request")
+    def friend_request(body: FriendReqIn):
+        try:
+            return friends.request(body.frm, body.to)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @app.get("/friends/requests")
+    def friend_requests():
+        return friends.list_requests()
+
+    @app.post("/friends/approve")
+    def friend_approve(body: FriendReqIn):
+        try:
+            return friends.approve(body.frm, body.to)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @app.post("/friends/decline")
+    def friend_decline(body: FriendReqIn):
+        return {"declined": friends.decline(body.frm, body.to)}
+
+    @app.get("/credits/{name}")
+    def credit_balance(name: str):
+        return {"name": name, "balance": credits.balance_of(name)}
+
+    @app.post("/credits/grant")
+    def credit_grant(body: CreditGrantIn):
+        try:
+            return {"name": body.name, "balance": credits.grant(body.name, body.amount, body.reason)}
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
     @app.post("/files")
     def upload_file(body: FileIn):
